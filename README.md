@@ -13,30 +13,38 @@ Telegram-бот на TypeScript + Cloudflare Workers + D1 + OpenAI. Оригин
 
 В чате не нужно писать команду. Если никто не пишет или бюджет исчерпан, бот молчит. Бот не проверяет личность участников сверх Telegram user ID.
 
-## Настройка с нуля
+## CI/CD: GitHub Actions
 
-Нужны Node.js 22+, аккаунт Cloudflare, Telegram-бот из [@BotFather](https://t.me/BotFather) и отдельный оплачиваемый OpenAI API-аккаунт.
+**Ничего не нужно запускать локально, чтобы применить миграции и задеплоить бота.** Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) выполняется после каждого push в `master` и может запускаться вручную через GitHub Actions → **CI / Deploy** → **Run workflow**:
 
-База **`disco-elysium`** уже создана в Cloudflare и прописана в `wrangler.jsonc` (binding `DB`). Создавать её повторно или вручную менять ID не нужно.
+1. TypeScript typecheck + тесты.
+2. Автоматическое применение ожидающих миграций в удалённую базу D1 `disco-elysium` (`npm run db:remote`).
+3. Только при успехе миграций — деплой Worker (`npm run deploy`).
 
-```bash
-git clone https://github.com/raphickie/disco-elysium-bot.git
-cd disco-elysium-bot
-npm install
-npx wrangler login
-```
+Pull request запускает только тесты, без доступа к секретам и Cloudflare. Деплои сериализованы, чтобы избежать одновременного применения миграций. Уже применённые миграции Wrangler пропускает.
 
-Затем применить миграцию к удалённой D1 и добавить секреты:
+### Одноразовая настройка доступа GitHub → Cloudflare
 
-```bash
-npm run db:remote
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put OPENAI_API_KEY
-npm run deploy
-```
+База **`disco-elysium`** уже создана, её ID прописан в `wrangler.jsonc` с binding `DB`. Создавать базу заново не нужно.
 
-Каждая команда `secret put` запросит значение **в терминале**. Не добавляй ключи в GitHub и не коммить `.dev.vars`.
+1. В [Cloudflare Dashboard](https://dash.cloudflare.com/) найди **Account ID** твоего Cloudflare-аккаунта — это **не** Database ID D1.
+2. В [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) создай токен для CI (можно использовать шаблон **Edit Cloudflare Workers**). Ограничь его нужным Cloudflare-аккаунтом и предоставь права на развёртывание Workers и **D1: Edit** для миграций. Токен не публикуй.
+3. Открой [GitHub → Settings → Secrets and variables → Actions](https://github.com/raphickie/disco-elysium-bot/settings/secrets/actions) и добавь два **repository secret**:
+   - `CLOUDFLARE_ACCOUNT_ID` — Account ID из Cloudflare.
+   - `CLOUDFLARE_API_TOKEN` — созданный Cloudflare API token.
+4. Открой [GitHub Actions](https://github.com/raphickie/disco-elysium-bot/actions) → **CI / Deploy** → **Run workflow**. После успешных тестов workflow сам применит миграцию D1 и создаст/обновит Worker.
+
+Пока хотя бы один из двух секретов отсутствует, workflow успешно проверяет код, но **пропускает** миграцию и деплой с явным уведомлением в логах и Summary. После добавления секретов нужно **повторно запустить** workflow (или запушить коммит).
+
+### Одноразовая настройка секретов самого Worker
+
+После первого деплоя зайди в **Cloudflare Dashboard → Workers & Pages → disco-elysium-bot → Settings → Variables and Secrets** и добавь следующие значения как **Secret**:
+
+- `TELEGRAM_BOT_TOKEN` — выдан @BotFather.
+- `TELEGRAM_WEBHOOK_SECRET` — случайная строка для проверки webhook.
+- `OPENAI_API_KEY` — отдельный платный ключ OpenAI API.
+
+Это **секреты Cloudflare Worker**, не GitHub Actions. Не присылай ключи в чат и не сохраняй в файлах репозитория. После первичной настройки при дальнейших пушах обычно ничего вводить заново не требуется.
 
 Сгенерируй `TELEGRAM_WEBHOOK_SECRET` как случайную строку из латинских букв, цифр, `_` или `-` (1–256 символов). Используй **одинаковое** значение для Worker и регистрации webhook.
 
@@ -56,7 +64,7 @@ unset TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
 
 ### Как узнать chat ID
 
-Для первого теста можно временно выставить `WHITELIST_ENABLED: "false"` и добавить бота в группу. Однако безопаснее узнать ID через Telegram `getUpdates` **до установки webhook** или отдельного бота: у групп ID обычно отрицательный (`-100...`). Затем внеси нужные ID через запятую в `ALLOWED_CHAT_IDS` в `wrangler.jsonc` и сделай `npm run deploy`.
+Для первого теста можно временно выставить `WHITELIST_ENABLED: "false"` и добавить бота в группу. Однако безопаснее узнать ID через Telegram `getUpdates` **до установки webhook** или отдельного бота: у групп ID обычно отрицательный (`-100...`). Затем внеси нужные ID через запятую в `ALLOWED_CHAT_IDS` в `wrangler.jsonc` и закоммить изменение: GitHub Actions сам задеплоит новую конфигурацию.
 
 По умолчанию вайтлист **включён**, а список пуст — бот не отвечает ни в одном чате до явного разрешения.
 
@@ -78,7 +86,7 @@ unset TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
 
 **Важно:** тарифы в конфигурации — лишь начальные значения, их нужно сверить с актуальной стоимостью выбранной модели. Лимиты в D1 являются внутренними ограничителями **расчётных** расходов, а не заменой платёжных лимитов OpenAI. Дополнительно установи ограничение бюджета на стороне API-провайдера. При ошибке Telegram после успешной генерации стоимость LLM всё равно учитывается. У зависших попыток резерв освобождается через 10 минут.
 
-Для локального запуска: `cp .dev.vars.example .dev.vars`, заполнить локальные секреты, `npm run db:local`, `npm run dev`. Telegram webhook требует публичного HTTPS URL.
+**Необязательно, для локальной разработки:** установи Node.js 22+, выполни `npm install`, `cp .dev.vars.example .dev.vars`, заполни локальные секреты, `npm run db:local`, `npm run dev`. Telegram webhook требует публичного HTTPS URL; обычные миграции и production deploy при этом по-прежнему выполняются автоматически из GitHub Actions.
 
 ## Проверка
 
