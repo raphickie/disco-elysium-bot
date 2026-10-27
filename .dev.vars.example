@@ -1,0 +1,4 @@
+# Only for local development; NEVER commit real tokens.
+TELEGRAM_BOT_TOKEN="replace-with-botfather-token"
+TELEGRAM_WEBHOOK_SECRET="replace-with-random-alphanumeric-secret"
+OPENAI_API_KEY="replace-with-openai-api-key"
