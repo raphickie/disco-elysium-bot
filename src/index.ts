@@ -58,7 +58,7 @@ export default {
     ctx.waitUntil(process(update,env,s).catch(e=>console.error('Webhook processing:',String(e))));
     return new Response('ok');
   },
-  async scheduled(_event:ScheduledEvent,env:Env,_ctx:ExecutionContext):Promise<void>{
+  async scheduled(_event:ScheduledController,env:Env,_ctx:ExecutionContext):Promise<void>{
     await cleanup(env.DB,Math.floor(Date.now()/1000),settings(env).historySeconds/3600);
   }
 } satisfies ExportedHandler<Env>;
