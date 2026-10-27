@@ -3,7 +3,7 @@
   "name": "disco-elysium-bot",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "d1_databases": [{"binding":"DB","database_name":"disco_bot","database_id":"REPLACE_WITH_D1_DATABASE_ID","migrations_dir":"migrations"}],
+  "d1_databases": [{"binding":"DB","database_name":"disco-elysium","database_id":"fbd1ca36-2efe-4a39-8294-eaa721b04aba","migrations_dir":"migrations"}],
   "triggers": {"crons":["*/10 * * * *"]},
   "vars": {
     "WHITELIST_ENABLED":"true",

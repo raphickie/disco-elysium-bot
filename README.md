@@ -17,13 +17,16 @@ Telegram-бот на TypeScript + Cloudflare Workers + D1 + OpenAI. Оригин
 
 Нужны Node.js 22+, аккаунт Cloudflare, Telegram-бот из [@BotFather](https://t.me/BotFather) и отдельный оплачиваемый OpenAI API-аккаунт.
 
+База **`disco-elysium`** уже создана в Cloudflare и прописана в `wrangler.jsonc` (binding `DB`). Создавать её повторно или вручную менять ID не нужно.
+
 ```bash
+git clone https://github.com/raphickie/disco-elysium-bot.git
+cd disco-elysium-bot
 npm install
 npx wrangler login
-npx wrangler d1 create disco_bot
 ```
 
-Команда `d1 create` вернёт `database_id`. Замени `REPLACE_WITH_D1_DATABASE_ID` в `wrangler.jsonc` на реальный ID, затем:
+Затем применить миграцию к удалённой D1 и добавить секреты:
 
 ```bash
 npm run db:remote
