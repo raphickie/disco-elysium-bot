@@ -2,38 +2,24 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "disco-elysium-bot",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-20",
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "disco-elysium-bot-db"
-    }
-  ],
-  "triggers": {
-    "crons": ["0 */6 * * *"]
-  },
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [{"binding":"DB","database_name":"disco_bot","database_id":"REPLACE_WITH_D1_DATABASE_ID","migrations_dir":"migrations"}],
+  "triggers": {"crons":["*/10 * * * *"]},
   "vars": {
-    "BOT_ENABLED": "true",
-    "WHITELIST_ENABLED": "true",
-    "ALLOWED_CHAT_IDS": "",
-    "REPLY_PERCENT": "1",
-    "MIN_CONTEXT_MESSAGES": "4",
-    "MIN_CONTEXT_USERS": "2",
-    "CONTEXT_MESSAGE_LIMIT": "10",
-    "CONTEXT_WINDOW_MINUTES": "30",
-    "MESSAGE_TTL_HOURS": "24",
-    "MAX_MESSAGE_CHARS": "400",
-    "MAX_UPDATE_AGE_SECONDS": "300",
-    "COOLDOWN_SECONDS": "1200",
-    "MAX_DAILY_REPLIES_PER_CHAT": "8",
-    "CHAT_DAILY_LIMIT_USD": "0.05",
-    "CHAT_MONTHLY_LIMIT_USD": "0.50",
-    "GLOBAL_DAILY_LIMIT_USD": "0.50",
-    "GLOBAL_MONTHLY_LIMIT_USD": "5",
-    "OPENAI_MODEL": "gpt-6-luna",
-    "MODEL_INPUT_USD_PER_MILLION": "0.10",
-    "MODEL_OUTPUT_USD_PER_MILLION": "0.50",
-    "MAX_OUTPUT_TOKENS": "220",
-    "MAX_REPLY_CHARS": "520"
+    "WHITELIST_ENABLED":"true",
+    "ALLOWED_CHAT_IDS":"",
+    "REPLY_PERCENT":"1",
+    "COOLDOWN_SECONDS":"900",
+    "CONTEXT_MESSAGES":"12",
+    "CONTEXT_WINDOW_MINUTES":"20",
+    "HISTORY_HOURS":"48",
+    "CHAT_DAILY_USD":"0.10",
+    "CHAT_MONTHLY_USD":"1.00",
+    "GLOBAL_DAILY_USD":"1.00",
+    "GLOBAL_MONTHLY_USD":"10.00",
+    "RESERVED_USD_PER_CALL":"0.02",
+    "OPENAI_MODEL":"gpt-4.1-mini",
+    "OPENAI_INPUT_USD_PER_MILLION":"0.40",
+    "OPENAI_OUTPUT_USD_PER_MILLION":"1.60"
   }
 }
