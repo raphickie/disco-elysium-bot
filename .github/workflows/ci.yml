@@ -82,11 +82,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "::error title=OpenAI API key missing::Set OPENAI_API_KEY in GitHub Repository Secrets."
-            exit 1
+          if [[ -n "$OPENAI_API_KEY" ]]; then
+            printf %s "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
+          else
+            echo "::notice title=OpenAI API key not configured::Worker is live and /ping works; text generation is disabled until OPENAI_API_KEY is configured."
           fi
-          printf %s "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
 
       - name: Sync webhook secret into Worker
         env:

@@ -1,5 +1,5 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
-import {type TelegramUpdate,type TelegramMessage,sendMessage} from './telegram';
+import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand} from './telegram';
 import {store,recent,conversational,claim,settle,cleanup} from './storage';
 import {generate} from './generator';
 
@@ -13,12 +13,29 @@ function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
 
 async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   const m=update.message;
-  if(!validMessage(m)||!isAllowed(m.chat.id,s))return;
+  if(!m||!m.from||m.from.is_bot)return;
+  const isGroup=['group','supergroup'].includes(m.chat.type);
+  if(!isGroup&&m.chat.type!=='private')return;
+  // Private chats allow an inexpensive ping even before any group is whitelisted.
+  // Group pings honour the whitelist, just like normal generated replies.
+  if(isGroup&&!isAllowed(m.chat.id,s))return;
   const now=Math.floor(Date.now()/1000);
   // Ignore stale replayed updates and very old messages.
   if(Math.abs(now-m.date)>300)return;
+
+  // Health check: no D1 access, OpenAI token, probability check or LLM costs.
+  if(isPingCommand(m.text)){
+    if(!env.TELEGRAM_BOT_TOKEN) {
+      console.warn('Telegram bot token missing: cannot respond to /ping');
+      return;
+    }
+    await sendMessage(env,m.chat.id,m.message_id,'pong');
+    return;
+  }
+
+  if(!isGroup||!validMessage(m))return;
   if(!await store(env.DB,update.update_id,m))return;
-  if(!shouldReply(s.probability,Math.random()))return;
+  if(!env.OPENAI_API_KEY||!shouldReply(s.probability,Math.random()))return;
   const context=await recent(env.DB,m.chat.id,s,now);
   if(!conversational(context))return;
 
@@ -44,6 +61,9 @@ export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
     const url=new URL(request.url);
     if(url.pathname==='/health'&&request.method==='GET')return new Response('ok');
+    // Public liveness probe, independent of Telegram, D1 and OpenAI credentials.
+    if(url.pathname==='/ping'&&request.method==='GET')
+      return new Response('pong',{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
     if(url.pathname!=='/telegram/webhook'||request.method!=='POST')return new Response('Not found',{status:404});
     if(!env.TELEGRAM_WEBHOOK_SECRET||request.headers.get('X-Telegram-Bot-Api-Secret-Token')!==env.TELEGRAM_WEBHOOK_SECRET)
       return new Response('Unauthorized',{status:401});

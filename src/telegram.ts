@@ -5,6 +5,11 @@ export type TelegramMessage={
   from?:{id:number;is_bot?:boolean;first_name?:string;last_name?:string;username?:string};
 };
 export type TelegramUpdate={update_id:number;message?:TelegramMessage};
+
+// Only handle the exact command; never react to a command addressed to another bot.
+export function isPingCommand(text:string|undefined):boolean {
+  return typeof text==='string' && text.trim().toLowerCase()==='/ping';
+}
 export async function sendMessage(env:Env,chatId:number,replyTo:number,text:string):Promise<void>{
   const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{
     method:'POST',headers:{'Content-Type':'application/json'},
