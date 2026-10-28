@@ -76,6 +76,18 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run deploy
 
+      - name: Sync OpenAI API key into Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "::error title=OpenAI API key missing::Set OPENAI_API_KEY in GitHub Repository Secrets."
+            exit 1
+          fi
+          printf %s "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
+
       - name: Sync webhook secret into Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -114,4 +126,4 @@ jobs:
       - name: Deployment summary
         run: |
           echo "### Deployment and Telegram webhook registration complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "D1 migrations, Worker deployment, Telegram secrets sync and Telegram webhook registration succeeded." >> "$GITHUB_STEP_SUMMARY"
+          echo "D1 migrations, Worker deployment, OpenAI and Telegram secrets sync, and Telegram webhook registration succeeded." >> "$GITHUB_STEP_SUMMARY"

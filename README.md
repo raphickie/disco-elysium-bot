@@ -21,7 +21,7 @@ Telegram-бот на TypeScript + Cloudflare Workers + D1 + OpenAI. Оригин
 2. Автоматическое применение ожидающих миграций в удалённую базу D1 `disco-elysium` (`npm run db:remote`).
 3. Проверка `workers.dev`: если у аккаунта ещё нет поддомена, workflow однократно регистрирует `raphickie-apps.workers.dev` (при занятости имени — уникальный вариант). Уже существующий поддомен **не изменяется**.
 4. Только при успехе всех предыдущих шагов — деплой Worker (`npm run deploy`).
-5. Синхронизация Telegram-секретов из GitHub в Worker и регистрация webhook через Telegram Bot API.
+5. Синхронизация OpenAI-ключа и Telegram-секретов из GitHub в Worker и регистрация webhook через Telegram Bot API.
 
 Pull request запускает только тесты, без доступа к секретам и Cloudflare. Деплои сериализованы, чтобы избежать одновременного применения миграций. Уже применённые миграции Wrangler пропускает.
 
@@ -40,11 +40,15 @@ Pull request запускает только тесты, без доступа �
 
 ### Секреты Telegram и OpenAI
 
-В [GitHub Repository secrets](https://github.com/raphickie/disco-elysium-bot/settings/secrets/actions) добавь `TELEGRAM_BOT_TOKEN` (из @BotFather) и `TELEGRAM_WEBHOOK_SECRET` (случайный секрет, 1–256 латинских букв, цифр, `_` или `-`). Уже настроенные `CLOUDFLARE_API_TOKEN` и `CLOUDFLARE_ACCOUNT_ID` оставь там же.
+В [GitHub Repository secrets](https://github.com/raphickie/disco-elysium-bot/settings/secrets/actions) хранятся **все три секрета приложения**:
 
-GitHub Actions после деплоя **автоматически синхронизирует оба Telegram-секрета** в Cloudflare Worker и вызовет `setWebhook` с адресом Worker. Обе стороны будут использовать одно и то же значение `TELEGRAM_WEBHOOK_SECRET`. Чтобы ротировать его позже: обнови Repository secret и перезапусти **CI / Deploy**. Если `TELEGRAM_BOT_TOKEN` пока не задан, шаг регистрации webhook сообщит об этом в журнале.
+- `TELEGRAM_BOT_TOKEN` — токен от @BotFather.
+- `TELEGRAM_WEBHOOK_SECRET` — случайный секрет webhook (1–256 латинских букв, цифр, `_` или `-`).
+- `OPENAI_API_KEY` — ключ OpenAI API из отдельного биллингового аккаунта OpenAI.
 
-Сам `OPENAI_API_KEY` добавь вручную в **Cloudflare Dashboard → Workers & Pages → disco-elysium-bot → Settings → Variables and Secrets** с типом **Secret**. GitHub Actions этот ключ не требует и не синхронизирует.
+Уже настроенные `CLOUDFLARE_API_TOKEN` и `CLOUDFLARE_ACCOUNT_ID` остаются там же — они служат только для деплоя.
+
+**GitHub Actions автоматически синхронизирует все три секрета в Cloudflare Worker**, затем регистрирует webhook через Telegram `setWebhook`. Добавлять те же значения вручную через Cloudflare Dashboard **не нужно**. Если `OPENAI_API_KEY` отсутствует, соответствующий этап деплоя завершится ошибкой. Чтобы ротировать любой ключ, обнови Repository secret и перезапусти **CI / Deploy**.
 
 Секреты **не** передавай в чат и **не** добавляй в исходный код. Если значение секретного webhook-токена публиковалось, сгенерируй новое.
 В BotFather выключи **Group Privacy** (`/setprivacy` → Disable), иначе бот не увидит обычные сообщения группы. После переключения удали его из группы и добавь заново. Предупреди участников о передаче небольших фрагментов переписки внешнему LLM-провайдеру.
