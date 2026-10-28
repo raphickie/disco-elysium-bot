@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
 // Bootstrap the account-wide workers.dev subdomain on the first CI deploy.
 // Existing subdomains are never changed. Requires Workers Scripts Write.
 const { CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: accountId } = process.env;
@@ -6,6 +7,12 @@ if (!token || !accountId) throw new Error('Cloudflare credentials are missing');
 
 const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/workers/subdomain`;
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+function publishSubdomain(value) {
+  if (!/^[a-z0-9-]{1,63}$/.test(value)) throw new Error('Invalid workers.dev subdomain');
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'subdomain=' + value + '\n');
+  console.log('workers.dev subdomain:', value);
+}
 
 async function request(method, body) {
   const response = await fetch(endpoint, {
@@ -23,7 +30,7 @@ function errors(result) {
 
 const existing = await request('GET');
 if (existing.ok && existing.payload.result?.subdomain) {
-  console.log('Using existing workers.dev subdomain:', existing.payload.result.subdomain);
+  publishSubdomain(existing.payload.result.subdomain);
   process.exit(0);
 }
 
@@ -44,7 +51,7 @@ for (let i = 0; i < names.length; i++) {
   const name = names[i];
   const created = await request('PUT', { subdomain: name });
   if (created.ok && created.payload.result?.subdomain) {
-    console.log('Registered workers.dev subdomain:', created.payload.result.subdomain);
+    publishSubdomain(created.payload.result.subdomain);
     process.exit(0);
   }
   const detail = errors(created);

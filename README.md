@@ -21,6 +21,7 @@ Telegram-бот на TypeScript + Cloudflare Workers + D1 + OpenAI. Оригин
 2. Автоматическое применение ожидающих миграций в удалённую базу D1 `disco-elysium` (`npm run db:remote`).
 3. Проверка `workers.dev`: если у аккаунта ещё нет поддомена, workflow однократно регистрирует `raphickie-apps.workers.dev` (при занятости имени — уникальный вариант). Уже существующий поддомен **не изменяется**.
 4. Только при успехе всех предыдущих шагов — деплой Worker (`npm run deploy`).
+5. Синхронизация Telegram-секретов из GitHub в Worker и регистрация webhook через Telegram Bot API.
 
 Pull request запускает только тесты, без доступа к секретам и Cloudflare. Деплои сериализованы, чтобы избежать одновременного применения миграций. Уже применённые миграции Wrangler пропускает.
 
@@ -37,30 +38,15 @@ Pull request запускает только тесты, без доступа �
 
 Если один из секретов отсутствует, job **завершится ошибкой** с явным уведомлением (вместо ложного успешного деплоя). После добавления секретов достаточно повторно запустить workflow или запушить коммит.
 
-### Одноразовая настройка секретов самого Worker
+### Секреты Telegram и OpenAI
 
-После первого деплоя зайди в **Cloudflare Dashboard → Workers & Pages → disco-elysium-bot → Settings → Variables and Secrets** и добавь следующие значения как **Secret**:
+В [GitHub Repository secrets](https://github.com/raphickie/disco-elysium-bot/settings/secrets/actions) добавь `TELEGRAM_BOT_TOKEN` (из @BotFather) и `TELEGRAM_WEBHOOK_SECRET` (случайный секрет, 1–256 латинских букв, цифр, `_` или `-`). Уже настроенные `CLOUDFLARE_API_TOKEN` и `CLOUDFLARE_ACCOUNT_ID` оставь там же.
 
-- `TELEGRAM_BOT_TOKEN` — выдан @BotFather.
-- `TELEGRAM_WEBHOOK_SECRET` — случайная строка для проверки webhook.
-- `OPENAI_API_KEY` — отдельный платный ключ OpenAI API.
+GitHub Actions после деплоя **автоматически синхронизирует оба Telegram-секрета** в Cloudflare Worker и вызовет `setWebhook` с адресом Worker. Обе стороны будут использовать одно и то же значение `TELEGRAM_WEBHOOK_SECRET`. Чтобы ротировать его позже: обнови Repository secret и перезапусти **CI / Deploy**. Если `TELEGRAM_BOT_TOKEN` пока не задан, шаг регистрации webhook сообщит об этом в журнале.
 
-Это **секреты Cloudflare Worker**, не GitHub Actions. Не присылай ключи в чат и не сохраняй в файлах репозитория. После первичной настройки при дальнейших пушах обычно ничего вводить заново не требуется.
+Сам `OPENAI_API_KEY` добавь вручную в **Cloudflare Dashboard → Workers & Pages → disco-elysium-bot → Settings → Variables and Secrets** с типом **Secret**. GitHub Actions этот ключ не требует и не синхронизирует.
 
-Сгенерируй `TELEGRAM_WEBHOOK_SECRET` как случайную строку из латинских букв, цифр, `_` или `-` (1–256 символов). Используй **одинаковое** значение для Worker и регистрации webhook.
-
-После деплоя Wrangler выведет URL, например `https://disco-elysium-bot.<account>.workers.dev`. Зарегистрируй webhook (токен и секрет подставь **локально**, не отправляй их в чат):
-
-```bash
-read -rs TELEGRAM_BOT_TOKEN; echo
-read -rs TELEGRAM_WEBHOOK_SECRET; echo
-curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  --data-urlencode "url=https://YOUR-WORKER.workers.dev/telegram/webhook" \
-  --data-urlencode "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
-  --data-urlencode 'allowed_updates=["message"]'
-unset TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
-```
-
+Секреты **не** передавай в чат и **не** добавляй в исходный код. Если значение секретного webhook-токена публиковалось, сгенерируй новое.
 В BotFather выключи **Group Privacy** (`/setprivacy` → Disable), иначе бот не увидит обычные сообщения группы. После переключения удали его из группы и добавь заново. Предупреди участников о передаче небольших фрагментов переписки внешнему LLM-провайдеру.
 
 ### Как узнать chat ID

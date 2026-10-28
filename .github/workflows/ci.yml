@@ -22,6 +22,10 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
+      - name: Validate deployment scripts
+        run: |
+          node --check scripts/ensure-workers-subdomain.mjs
+          node --check scripts/set-webhook.mjs
 
   deploy:
     name: Migrate D1 and deploy Worker
@@ -60,6 +64,7 @@ jobs:
       # Account initialization only: if workers.dev is not registered,
       # set up a sensible account-wide subdomain without a browser prompt.
       - name: Ensure workers.dev subdomain
+        id: worker_subdomain
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -71,7 +76,42 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run deploy
 
+      - name: Sync webhook secret into Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: |
+          if [[ -z "$TELEGRAM_WEBHOOK_SECRET" ]]; then
+            echo "::error title=Webhook secret missing::Set TELEGRAM_WEBHOOK_SECRET in GitHub Repository Secrets."
+            exit 1
+          fi
+          if [[ ! "$TELEGRAM_WEBHOOK_SECRET" =~ ^[A-Za-z0-9_-]{1,256}$ ]]; then
+            echo "::error title=Invalid webhook secret::Use letters, digits, underscores or hyphens (1-256 characters)."
+            exit 1
+          fi
+          printf %s "$TELEGRAM_WEBHOOK_SECRET" | npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+
+      - name: Sync bot token into Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [[ -z "$TELEGRAM_BOT_TOKEN" ]]; then
+            echo "::error title=Telegram bot token missing::Set TELEGRAM_BOT_TOKEN in GitHub Repository Secrets."
+            exit 1
+          fi
+          printf %s "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN
+
+      - name: Register webhook with Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          WORKER_URL: https://disco-elysium-bot.${{ steps.worker_subdomain.outputs.subdomain }}.workers.dev
+        run: node scripts/set-webhook.mjs
+
       - name: Deployment summary
         run: |
-          echo "### Deployment complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "Pending migrations for D1 database \`disco-elysium\` were applied before the Worker deployment." >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deployment and Telegram webhook registration complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "D1 migrations, Worker deployment, Telegram secrets sync and Telegram webhook registration succeeded." >> "$GITHUB_STEP_SUMMARY"
