@@ -1,7 +1,7 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
 import worker from '../src/index';
 import {mentionsBot} from '../src/telegram';
-import {store,recent,conversational,claim,settle,contextMessageLimit} from '../src/storage';
+import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability} from '../src/storage';
 import {generate} from '../src/generator';
 import type {Env} from '../src/config';
 
@@ -13,7 +13,10 @@ vi.mock('../src/storage',()=>({
   settle:vi.fn(async()=>{}),
   cleanup:vi.fn(async()=>{}),
   contextMessageLimit:vi.fn(async()=>30),
-  setContextMessageLimit:vi.fn(async()=>{})
+  setContextMessageLimit:vi.fn(async()=>{}),
+  replyProbability:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
+  setReplyProbability:vi.fn(async()=>{}),
+  resetReplyProbability:vi.fn(async()=>{})
 }));
 vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_context:unknown,_mentioned:boolean,onCost:(cost:number)=>void)=>{
   onCost(0.001);
@@ -55,6 +58,7 @@ describe('direct mention',()=>{
     expect(contextMessageLimit).toHaveBeenCalledOnce();
     expect(recent).toHaveBeenCalledOnce();
     expect(conversational).not.toHaveBeenCalled();
+    expect(replyProbability).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),true);
     expect(generate).toHaveBeenCalledOnce();
     expect(vi.mocked(generate).mock.calls[0][3]).toBe(true);
@@ -63,8 +67,20 @@ describe('direct mention',()=>{
   });
   it('keeps ordinary messages under the probability gate',async()=>{
     expect(await send('Обычное сообщение')).toEqual([]);
+    expect(replyProbability).toHaveBeenCalledWith(expect.anything(),-1001,0);
     expect(generate).not.toHaveBeenCalled();
     expect(claim).not.toHaveBeenCalled();
+  });
+  it('uses the chat override for ordinary messages',async()=>{
+    vi.mocked(replyProbability).mockResolvedValueOnce(100);
+    vi.mocked(conversational).mockReturnValueOnce(true);
+    expect(await send('Обычное сообщение','key','0')).toEqual(['Голос: ответ']);
+    expect(generate).toHaveBeenCalledOnce();
+  });
+  it('lets a chat override disable ordinary replies',async()=>{
+    vi.mocked(replyProbability).mockResolvedValueOnce(0);
+    expect(await send('Обычное сообщение','key','100')).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
   });
   it('acknowledges a budget or concurrency rejection',async()=>{
     vi.mocked(claim).mockResolvedValueOnce(null);

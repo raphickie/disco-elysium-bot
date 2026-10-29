@@ -1,8 +1,9 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
 import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
-import {store,recent,conversational,claim,settle,cleanup,contextMessageLimit,setContextMessageLimit} from './storage';
+import {store,recent,conversational,claim,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
+import {parseProbabilityCommand,type ProbabilityCommand} from './probability';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
   if(!m||!['group','supergroup'].includes(m.chat.type))return false;
@@ -37,6 +38,36 @@ async function handleContextCommand(m:TelegramMessage,command:ContextCommand,env
   await sendMessage(env,m.chat.id,m.message_id,`Готово: теперь беру до ${command.value} последних сообщений за 20 минут.`);
 }
 
+async function handleProbabilityCommand(m:TelegramMessage,command:ProbabilityCommand,env:Env,s:Settings,now:number):Promise<void>{
+  if(!await commandTargetsBot(env,command.target))return;
+  if(command.kind==='invalid'){
+    await sendMessage(env,m.chat.id,m.message_id,command.message);
+    return;
+  }
+  if(command.kind==='show'){
+    const value=await replyProbability(env.DB,m.chat.id,s.probability);
+    await sendMessage(env,m.chat.id,m.message_id,`Вероятность запуска Режиссёра в этом чате: ${value}%. Изменить: /reply_percent <0–100>. Сбросить: /reply_percent reset.`);
+    return;
+  }
+  let admin:boolean;
+  try{admin=await isChatAdmin(env,m.chat.id,m.from!.id);}
+  catch{
+    await sendMessage(env,m.chat.id,m.message_id,'Не удалось проверить права администратора. Попробуй позже.');
+    return;
+  }
+  if(!admin){
+    await sendMessage(env,m.chat.id,m.message_id,'Менять вероятность может только администратор чата.');
+    return;
+  }
+  if(command.kind==='reset'){
+    await resetReplyProbability(env.DB,m.chat.id,now);
+    await sendMessage(env,m.chat.id,m.message_id,`Готово: вероятность снова ${s.probability}% — общий дефолт.`);
+    return;
+  }
+  await setReplyProbability(env.DB,m.chat.id,command.value,now);
+  await sendMessage(env,m.chat.id,m.message_id,`Готово: вероятность запуска Режиссёра в этом чате — ${command.value}%.`);
+}
+
 async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   const m=update.message;
   if(!m||!m.from||m.from.is_bot)return;
@@ -62,10 +93,15 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(!isGroup)return;
   const command=parseContextCommand(m.text??'');
   if(command){await handleContextCommand(m,command,env,now);return;}
+  const probabilityCommand=parseProbabilityCommand(m.text??'');
+  if(probabilityCommand){await handleProbabilityCommand(m,probabilityCommand,env,s,now);return;}
   if(!validMessage(m))return;
   if(!await store(env.DB,update.update_id,m))return;
   const mentioned=mentionsBot(m.text??m.caption);
-  if(!mentioned&&!shouldReply(s.probability,Math.random()))return;
+  if(!mentioned){
+    const probability=await replyProbability(env.DB,m.chat.id,s.probability);
+    if(!shouldReply(probability,Math.random()))return;
+  }
   if(!env.OPENAI_API_KEY){
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
     return;

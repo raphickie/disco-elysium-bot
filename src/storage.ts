@@ -3,6 +3,25 @@ import type {TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
 import {DEFAULT_CONTEXT_MESSAGES,MAX_CONTEXT_MESSAGES} from './context';
 
+export async function replyProbability(db:D1Database,chatId:number,fallback:number):Promise<number>{
+  const row=await db.prepare('SELECT reply_percent FROM chat_settings WHERE chat_id=?')
+    .bind(chatId).first<{reply_percent:number|null}>();
+  return row?.reply_percent??fallback;
+}
+
+export async function setReplyProbability(db:D1Database,chatId:number,value:number,now:number):Promise<void>{
+  if(!Number.isFinite(value)||value<0||value>100)throw Error('Invalid reply probability');
+  await db.prepare(`INSERT INTO chat_settings(chat_id,context_messages,reply_percent,updated_at)
+    VALUES(?,?,?,?) ON CONFLICT(chat_id) DO UPDATE SET
+    reply_percent=excluded.reply_percent,updated_at=excluded.updated_at`)
+    .bind(chatId,DEFAULT_CONTEXT_MESSAGES,value,now).run();
+}
+
+export async function resetReplyProbability(db:D1Database,chatId:number,now:number):Promise<void>{
+  await db.prepare('UPDATE chat_settings SET reply_percent=NULL,updated_at=? WHERE chat_id=?')
+    .bind(now,chatId).run();
+}
+
 export async function store(db:D1Database,updateId:number,m:TelegramMessage):Promise<boolean>{
   const name=[m.from?.first_name,m.from?.last_name].filter(Boolean).join(' ').slice(0,60) || m.from?.username?.slice(0,60) || 'Аноним';
   const body=(m.text??m.caption??'').slice(0,900).trim();
