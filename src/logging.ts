@@ -1,6 +1,6 @@
 import type {TelegramMessage} from './telegram';
 
-type Detail=string|number|boolean|undefined;
+type Detail=string|number|boolean|readonly string[]|undefined;
 
 // One compact, searchable record per processed message. Never log chat text or tokens.
 export function logReply(m:TelegramMessage,outcome:string,details:Record<string,Detail>={}):void{

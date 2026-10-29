@@ -1,9 +1,9 @@
-import {afterEach,describe,it,expect,vi} from 'vitest';
+import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import {settings,type Env} from '../src/config';
 import {generate} from '../src/generator';
 import {selectReferences,copiesReference} from '../src/references';
 import {VOICE_REFERENCES} from '../src/voice-references';
-import {VOICES} from '../src/voices';
+import {VOICES,sampleVoices} from '../src/voices';
 
 const env={OPENAI_API_KEY:'test'} as Env;
 const s=settings(env);
@@ -14,7 +14,9 @@ function response(content:string,prompt_tokens=100,completion_tokens=50):Respons
 function decision(respond:boolean,voice='ТРЕПЕТ'):string{
   return JSON.stringify({respond,voice,focus_message:2,topic:'автобус и дождь',mood:'ироничная тоска',angle:'остановка стала главным героем'});
 }
-afterEach(()=>vi.unstubAllGlobals());
+// Deterministically draw the first three voices in integration tests.
+beforeEach(()=>vi.spyOn(Math,'random').mockReturnValue(0));
+afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 
 describe('two-stage generation',()=>{
   it('asks the director for a strict decision and uses its chosen voice',async()=>{
@@ -22,7 +24,7 @@ describe('two-stage generation',()=>{
     vi.stubGlobal('fetch',fetchMock);
     const costs:number[]=[];
     const result=await generate(env,s,context,false,cost=>costs.push(cost));
-    expect(result).toMatchObject({kind:'reply',voice:'ТРЕПЕТ'});
+    expect(result).toMatchObject({kind:'reply',voice:'ТРЕПЕТ',candidates:VOICES.slice(0,3)});
     expect(costs).toHaveLength(2);
     expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
     const first=JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -36,7 +38,9 @@ describe('two-stage generation',()=>{
     expect(costs[0]).toBeCloseTo((100*0.1+50*0.5)/1_000_000);
     expect(costs[1]).toBeCloseTo((100*2+50*10)/1_000_000);
     expect(first.response_format.json_schema.strict).toBe(true);
-    expect(first.response_format.json_schema.schema.properties.voice.enum).toContain('ТРЕПЕТ');
+    expect(first.response_format.json_schema.schema.properties.voice.enum).toEqual(VOICES.slice(0,3));
+    expect(first.messages[0].content).toContain('Доступные в этом вызове голоса (ровно три)');
+    expect(first.messages[0].content).not.toContain('ЭМПАТИЯ:');
     expect(first.messages[0].content).toContain('Обычный разговор: можно промолчать');
     expect(second.response_format).toBeUndefined();
     expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
@@ -54,12 +58,21 @@ describe('two-stage generation',()=>{
     expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('writes a reply to a direct mention even when the director returns false',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0.4); // draw ЭМПАТИЯ as the first candidate
     const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(false,'ЭМПАТИЯ'))).mockResolvedValueOnce(response('ЭМПАТИЯ — Успех\nТебя услышали.'));
     vi.stubGlobal('fetch',fetchMock);
     const result=await generate(env,s,context,true);
     expect(result).toMatchObject({kind:'reply',voice:'ЭМПАТИЯ'});
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content).toContain('respond обязан быть true');
+    const director=JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(director.response_format.json_schema.schema.properties.voice.enum).toContain('ЭМПАТИЯ');
+    expect(director.messages[0].content).toContain('respond обязан быть true');
+  });
+  it('rejects a director voice outside the sampled three even if API ignored the enum',async()=>{
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true,'ЭМПАТИЯ')));
+    vi.stubGlobal('fetch',fetchMock);
+    await expect(generate(env,s,context,true)).rejects.toThrow('Invalid director decision');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('reports director usage when the writer request fails',async()=>{
     const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true))).mockResolvedValueOnce(new Response('error',{status:429}));
@@ -108,5 +121,24 @@ describe('curated game references',()=>{
     expect(refs.some(ref=>ref.line===209)).toBe(true);
     expect(copiesReference(`ТРЕПЕТ — Успех\n${refs[0].text}`,refs)).toBe(true);
     expect(copiesReference('ТРЕПЕТ — Успех\nУ дождя сегодня смена без выходных.',refs)).toBe(false);
+  });
+});
+
+
+describe('random voice candidate selection',()=>{
+  it('draws three different voices without replacement',()=>{
+    expect(sampleVoices(()=>0)).toEqual(VOICES.slice(0,3));
+    expect(sampleVoices(()=>0.999999)).toEqual([VOICES[9],VOICES[0],VOICES[1]]);
+    expect(new Set(sampleVoices(()=>0.5)).size).toBe(3);
+  });
+  it('every voice has a chance to appear in the candidate set',()=>{
+    for(let index=0;index<VOICES.length;index++){
+      const random=vi.fn().mockReturnValueOnce((index+0.25)/VOICES.length).mockReturnValue(0);
+      const candidates=sampleVoices(random);
+      expect(candidates[0]).toBe(VOICES[index]);
+      expect(candidates).toHaveLength(3);
+      expect(new Set(candidates).size).toBe(3);
+      expect(random).toHaveBeenCalledTimes(3);
+    }
   });
 });

@@ -23,7 +23,7 @@ vi.mock('../src/storage',()=>({
 vi.mock('../src/logging',()=>({logReply:vi.fn(),errorCode:vi.fn(()=> 'llm_http_429')}));
 vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_context:unknown,_mentioned:boolean,onCost:(cost:number)=>void)=>{
   onCost(0.001);
-  return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА'};
+  return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА',candidates:['ЛОГИКА','ДРАМА','ТРЕПЕТ']};
 })}));
 
 async function send(text:string,apiKey='key',probability='0'):Promise<string[]>{
@@ -130,7 +130,7 @@ describe('direct mention',()=>{
     vi.mocked(conversational).mockReturnValueOnce(true);
     vi.mocked(generate).mockImplementationOnce(async(_env,_s,_context,_mentioned,onCost)=>{
       onCost?.(0.0005);
-      return {kind:'skip',cost:0.0005};
+      return {kind:'skip',cost:0.0005,candidates:['ЛОГИКА','ДРАМА','ТРЕПЕТ']};
     });
     expect(await send('Дождь опять пошёл','key','50')).toEqual([]);
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'failed',0.0005);

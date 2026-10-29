@@ -150,7 +150,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
     if(generated.kind==='skip'){
       await settle(env.DB,id,'failed',cost);
-      logReply(m,'director_skip',{mode,cost_usd:cost});
+      logReply(m,'director_skip',{mode,candidates:generated.candidates,cost_usd:cost});
       return;
     }
     attemptedTelegramSend=true;
@@ -158,7 +158,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     await sendMessage(env,m.chat.id,m.message_id,generated.text);
     stage='settlement';
     await settle(env.DB,id,'sent',cost);
-    logReply(m,'sent',{mode,voice:generated.voice,cost_usd:cost});
+    logReply(m,'sent',{mode,voice:generated.voice,candidates:generated.candidates,cost_usd:cost});
   }catch(e){
     logReply(m,'failed',{mode,stage,error_code:errorCode(e),cost_usd:cost});
     await settle(env.DB,id,'failed',cost);
