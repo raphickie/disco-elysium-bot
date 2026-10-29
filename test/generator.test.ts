@@ -2,6 +2,7 @@ import {afterEach,describe,it,expect,vi} from 'vitest';
 import {settings,type Env} from '../src/config';
 import {generate} from '../src/generator';
 import {selectReferences,copiesReference} from '../src/references';
+import {VOICE_REFERENCES} from '../src/voice-references';
 import {VOICES} from '../src/voices';
 
 const env={OPENAI_API_KEY:'test'} as Env;
@@ -33,7 +34,7 @@ describe('two-stage generation',()=>{
     expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
     expect(second.messages[0].content).toContain('остановка стала главным героем');
     expect(second.messages[0].content).toContain('result/Shivers.json:');
-    expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(5);
+    expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(8);
     expect(second.messages[1].content).toContain('Главный момент — сообщение 2');
   });
   it('skips the writer when the director sees no useful reply',async()=>{
@@ -60,6 +61,13 @@ describe('two-stage generation',()=>{
     expect(costs).toHaveLength(1);
     expect(costs[0]).toBeGreaterThan(0);
   });
+  it('keeps a longer reply allowed by the edited writer prompt',async()=>{
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(response(decision(true)))
+      .mockResolvedValueOnce(response(`ТРЕПЕТ — Успех\n${'Новая мысль. '.repeat(50)}`)));
+    const result=await generate(env,s,context);
+    expect(result.kind).toBe('reply');
+    if(result.kind==='reply')expect(result.text.length).toBeGreaterThan(550);
+  });
   it('regenerates once when the writer copies a game line',async()=>{
     const query='автобус и дождь ироничная тоска остановка стала главным героем Зато дождь пошёл';
     const copied=selectReferences('ТРЕПЕТ',query)[0].text;
@@ -77,14 +85,18 @@ describe('two-stage generation',()=>{
 describe('curated game references',()=>{
   it('has enough source-linked examples for every active voice',()=>{
     for(const voice of VOICES){
-      const refs=selectReferences(voice,'дождь спор вечеринка',5);
-      expect(refs).toHaveLength(5);
-      expect(new Set(refs.map(r=>r.line)).size).toBe(5);
+      const pool=VOICE_REFERENCES[voice];
+      expect(pool.items).toHaveLength(15);
+      expect(new Set(pool.items.map(r=>r.line)).size).toBe(15);
+      const refs=selectReferences(voice,'дождь спор вечеринка');
+      expect(refs).toHaveLength(8);
+      expect(new Set(refs.map(r=>r.line)).size).toBe(8);
       expect(refs.every(r=>r.text.length>20)).toBe(true);
+      expect(pool.items.every(r=>r.tags.length>0)).toBe(true);
     }
   });
   it('ranks a topical example and detects a copied line',()=>{
-    const refs=selectReferences('ТРЕПЕТ','дождь снег остановка город',5);
+    const refs=selectReferences('ТРЕПЕТ','дождь снег остановка город');
     expect(refs.some(ref=>ref.line===209)).toBe(true);
     expect(copiesReference(`ТРЕПЕТ — Успех\n${refs[0].text}`,refs)).toBe(true);
     expect(copiesReference('ТРЕПЕТ — Успех\nУ дождя сегодня смена без выходных.',refs)).toBe(false);

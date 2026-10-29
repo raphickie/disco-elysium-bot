@@ -1,6 +1,8 @@
 import {VOICE_REFERENCES,type VoiceReference} from './voice-references';
 import type {Voice} from './voices';
 
+export const REFERENCES_PER_REPLY=8;
+
 function stems(value:string):Set<string>{
   return new Set((value.toLowerCase().match(/[а-яёa-z0-9]{4,}/g)??[]).map(word=>word.slice(0,5)));
 }
@@ -11,7 +13,7 @@ function hash(value:string):number{
   return result>>>0;
 }
 
-export function selectReferences(voice:Voice,query:string,count=5):VoiceReference[]{
+export function selectReferences(voice:Voice,query:string,count=REFERENCES_PER_REPLY):VoiceReference[]{
   const source=VOICE_REFERENCES[voice];
   if(!source || source.items.length<count)throw Error(`Missing voice references: ${voice}`);
   const terms=stems(query);
