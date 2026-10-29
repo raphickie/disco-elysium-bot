@@ -1,9 +1,10 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
 import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
-import {store,recent,conversational,claim,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability} from './storage';
+import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
 import {parseProbabilityCommand,type ProbabilityCommand} from './probability';
+import {logReply,errorCode} from './logging';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
   if(!m||!['group','supergroup'].includes(m.chat.type))return false;
@@ -61,10 +62,12 @@ async function handleProbabilityCommand(m:TelegramMessage,command:ProbabilityCom
   }
   if(command.kind==='reset'){
     await resetReplyProbability(env.DB,m.chat.id,now);
+    logReply(m,'setting_changed',{setting:'reply_percent',value:s.probability,source:'default'});
     await sendMessage(env,m.chat.id,m.message_id,`Готово: вероятность снова ${s.probability}% — общий дефолт.`);
     return;
   }
   await setReplyProbability(env.DB,m.chat.id,command.value,now);
+  logReply(m,'setting_changed',{setting:'reply_percent',value:command.value,source:'chat'});
   await sendMessage(env,m.chat.id,m.message_id,`Готово: вероятность запуска Режиссёра в этом чате — ${command.value}%.`);
 }
 
@@ -75,18 +78,23 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(!isGroup&&m.chat.type!=='private')return;
   // Private chats allow an inexpensive ping even before any group is whitelisted.
   // Group pings honour the whitelist, just like normal generated replies.
-  if(isGroup&&!isAllowed(m.chat.id,s))return;
+  if(isGroup&&!isAllowed(m.chat.id,s)){
+    logReply(m,'whitelist_denied');
+    return;
+  }
   const now=Math.floor(Date.now()/1000);
   // Ignore stale replayed updates and very old messages.
-  if(Math.abs(now-m.date)>300)return;
+  if(Math.abs(now-m.date)>300){logReply(m,'stale_update');return;}
 
   // Health check: no D1 access, OpenAI token, probability check or LLM costs.
   if(isPingCommand(m.text)){
     if(!env.TELEGRAM_BOT_TOKEN) {
       console.warn('Telegram bot token missing: cannot respond to /ping');
+      logReply(m,'ping_failed',{reason:'telegram_token_missing'});
       return;
     }
     await sendMessage(env,m.chat.id,m.message_id,'pong');
+    logReply(m,'ping_sent');
     return;
   }
 
@@ -95,31 +103,46 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(command){await handleContextCommand(m,command,env,now);return;}
   const probabilityCommand=parseProbabilityCommand(m.text??'');
   if(probabilityCommand){await handleProbabilityCommand(m,probabilityCommand,env,s,now);return;}
-  if(!validMessage(m))return;
-  if(!await store(env.DB,update.update_id,m))return;
+  if(!validMessage(m)){logReply(m,'ignored_nontext_or_command');return;}
+  if(!await store(env.DB,update.update_id,m)){logReply(m,'duplicate_update');return;}
   const mentioned=mentionsBot(m.text??m.caption);
   let mustReply=mentioned;
+  let probability:number|undefined;
   if(!mentioned){
-    const probability=await replyProbability(env.DB,m.chat.id,s.probability);
-    if(!shouldReply(probability,Math.random()))return;
+    probability=await replyProbability(env.DB,m.chat.id,s.probability);
+    const roll=Math.random();
+    if(!shouldReply(probability,roll)){
+      logReply(m,'probability_miss',{probability,roll});
+      return;
+    }
     mustReply=probability===100;
   }
+  const mode=mentioned?'mention':mustReply?'always':'normal';
   if(!env.OPENAI_API_KEY){
+    logReply(m,'generation_unavailable',{reason:'openai_key_missing',mode});
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
     return;
   }
   const limit=await contextMessageLimit(env.DB,m.chat.id);
   const context=await recent(env.DB,m.chat.id,s,now,limit);
-  if(!mustReply&&!conversational(context))return;
+  if(!mustReply&&!conversational(context)){
+    logReply(m,'insufficient_activity',{mode,context_count:context.length});
+    return;
+  }
 
   const id=await claim(env.DB,m.chat.id,m.message_id,now,s,mustReply);
   if(id===null){
+    let reason='unknown';
+    try{reason=await diagnoseClaimRejection(env.DB,m.chat.id,m.message_id,now,s,mustReply);}
+    catch{/* Keep the original claim result if diagnosis fails. */}
+    logReply(m,'claim_rejected',{mode,reason,probability});
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
     return;
   }
 
   let cost=0;
   let attemptedTelegramSend=false;
+  let stage='generation';
   try {
     const generated=await generate(env,s,context,mustReply,amount=>{cost+=amount;});
     // Enforce the per-request reserve ceiling, even if provider usage surprises us.
@@ -127,13 +150,17 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
     if(generated.kind==='skip'){
       await settle(env.DB,id,'failed',cost);
+      logReply(m,'director_skip',{mode,cost_usd:cost});
       return;
     }
     attemptedTelegramSend=true;
+    stage='telegram_send';
     await sendMessage(env,m.chat.id,m.message_id,generated.text);
+    stage='settlement';
     await settle(env.DB,id,'sent',cost);
+    logReply(m,'sent',{mode,voice:generated.voice,cost_usd:cost});
   }catch(e){
-    console.error('Reply failed:',String(e));
+    logReply(m,'failed',{mode,stage,error_code:errorCode(e),cost_usd:cost});
     await settle(env.DB,id,'failed',cost);
     if(mentioned&&!attemptedTelegramSend)
       await sendMessage(env,m.chat.id,m.message_id,'Не получилось сгенерировать ответ. Попробуй ещё раз позже.');
@@ -158,7 +185,10 @@ export default {
     }catch{return new Response('Bad request',{status:400});}
     let s:Settings;
     try{s=settings(env);}catch(e){console.error('Configuration:',String(e));return new Response('Configuration error',{status:500});}
-    ctx.waitUntil(process(update,env,s).catch(e=>console.error('Webhook processing:',String(e))));
+    ctx.waitUntil(process(update,env,s).catch(e=>{
+      if(update.message)logReply(update.message,'processing_failed',{error_code:errorCode(e)});
+      else console.error('Webhook processing failed:',errorCode(e));
+    }));
     return new Response('ok');
   },
   async scheduled(_event:ScheduledController,env:Env,_ctx:ExecutionContext):Promise<void>{

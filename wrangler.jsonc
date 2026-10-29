@@ -5,6 +5,7 @@
   "compatibility_date": "2026-10-01",
   "d1_databases": [{"binding":"DB","database_name":"disco-elysium","database_id":"fbd1ca36-2efe-4a39-8294-eaa721b04aba","migrations_dir":"migrations"}],
   "triggers": {"crons":["*/10 * * * *"]},
+  "observability": {"enabled":true,"logs":{"enabled":true,"head_sampling_rate":1,"invocation_logs":false,"persist":true}},
   "vars": {
     "WHITELIST_ENABLED":"true",
     "ALLOWED_CHAT_IDS":"-1001890425588,-4922375667",

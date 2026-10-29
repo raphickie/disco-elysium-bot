@@ -97,6 +97,10 @@ Pull request запускает только тесты, без доступа �
 
 ## Проверка и диагностика
 
+В Cloudflare Dashboard открой **Workers & Pages → disco-elysium-bot → Observability → Logs**. Для живого потока при наличии локального доступа к Cloudflare можно запустить `npx wrangler tail disco-elysium-bot`. В `wrangler.jsonc` включено сохранение логов Worker с выборкой 100%.
+
+Для каждого обработанного сообщения бот пишет JSON-событие `reply_decision` с `chat_id`, `message_id` и итогом. Типичные `outcome`: `probability_miss`, `insufficient_activity`, `claim_rejected`, `director_skip`, `sent`, `failed`. У `claim_rejected` поле `reason` уточняет паузу, параллельную генерацию или конкретный дневной/месячный бюджет. При 100% в успешном ответе будет `mode: "always"`. Текст сообщений, имена участников и токены в эти записи не попадают. Если после отправки обычного сообщения события с его ID нет, Worker, вероятно, не получил Telegram update.
+
 - `GET https://disco-elysium-bot.raphickie-apps.workers.dev/ping` возвращает **`pong`** даже без каких-либо Telegram/OpenAI-секретов, базы данных и доступа к Telegram. Это проверка доступности Worker, а не всей интеграции.
 - Напиши боту в **личные сообщения** команду `/ping`: он ответит **`pong`** без OpenAI, D1 и настроек вероятности. Для этого по-прежнему нужны Telegram bot token и работающий webhook с его секретом.
 - В **группе** бот ответит на `/ping` только при отключённом whitelist или если `chat_id` входит в `ALLOWED_CHAT_IDS`. Команды, адресованные другому боту (`/ping@OtherBot`), игнорируются. `/ping` не расходует бюджет OpenAI.

@@ -102,6 +102,40 @@ RETURNING id`;
   }
 }
 
+export type ClaimRejectionReason=
+  'duplicate'|'already_generating'|'cooldown'|'chat_daily_budget'|'chat_monthly_budget'|
+  'global_daily_budget'|'global_monthly_budget'|'unknown';
+
+// Read-only diagnosis after the atomic claim rejects. A race may change the state
+// between the claim and this query, so "unknown" remains a valid result.
+export async function diagnoseClaimRejection(
+  db:D1Database,chatId:number,messageId:number,now:number,s:Settings,ignoreCooldown:boolean
+):Promise<ClaimRejectionReason>{
+  const {day,month}=dateKeys(now);
+  const row=await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM reply_attempts WHERE chat_id=? AND message_id=?) AS duplicate_count,
+    (SELECT COUNT(*) FROM reply_attempts WHERE chat_id=? AND status='pending') AS pending_count,
+    (SELECT COUNT(*) FROM reply_attempts WHERE chat_id=? AND status='sent' AND created_at>?) AS cooldown_count,
+    (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0) FROM reply_attempts WHERE chat_id=? AND day_key=?) AS chat_day_usd,
+    (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0) FROM reply_attempts WHERE chat_id=? AND month_key=?) AS chat_month_usd,
+    (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0) FROM reply_attempts WHERE day_key=?) AS global_day_usd,
+    (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0) FROM reply_attempts WHERE month_key=?) AS global_month_usd`)
+    .bind(chatId,messageId,chatId,chatId,now-s.cooldown,chatId,day,chatId,month,day,month)
+    .first<{
+      duplicate_count:number;pending_count:number;cooldown_count:number;
+      chat_day_usd:number;chat_month_usd:number;global_day_usd:number;global_month_usd:number;
+    }>();
+  if(!row)return 'unknown';
+  if(row.duplicate_count>0)return 'duplicate';
+  if(row.pending_count>0)return 'already_generating';
+  if(!ignoreCooldown&&row.cooldown_count>0)return 'cooldown';
+  if(row.chat_day_usd+s.reserve>s.chatDaily)return 'chat_daily_budget';
+  if(row.chat_month_usd+s.reserve>s.chatMonthly)return 'chat_monthly_budget';
+  if(row.global_day_usd+s.reserve>s.globalDaily)return 'global_daily_budget';
+  if(row.global_month_usd+s.reserve>s.globalMonthly)return 'global_monthly_budget';
+  return 'unknown';
+}
+
 export async function settle(db:D1Database,id:number,status:'sent'|'failed',cost:number):Promise<void>{
   await db.prepare(
     'UPDATE reply_attempts SET status=?,actual_usd=? WHERE id=? AND status=?'

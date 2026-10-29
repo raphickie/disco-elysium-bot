@@ -3,6 +3,7 @@ import worker from '../src/index';
 import {mentionsBot} from '../src/telegram';
 import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability} from '../src/storage';
 import {generate} from '../src/generator';
+import {logReply} from '../src/logging';
 import type {Env} from '../src/config';
 
 vi.mock('../src/storage',()=>({
@@ -10,6 +11,7 @@ vi.mock('../src/storage',()=>({
   recent:vi.fn(async()=>[{author:'Tester',body:'одна реплика',user_id:42}]),
   conversational:vi.fn(()=>false),
   claim:vi.fn(async()=>1),
+  diagnoseClaimRejection:vi.fn(async()=> 'chat_daily_budget'),
   settle:vi.fn(async()=>{}),
   cleanup:vi.fn(async()=>{}),
   contextMessageLimit:vi.fn(async()=>30),
@@ -18,6 +20,7 @@ vi.mock('../src/storage',()=>({
   setReplyProbability:vi.fn(async()=>{}),
   resetReplyProbability:vi.fn(async()=>{})
 }));
+vi.mock('../src/logging',()=>({logReply:vi.fn(),errorCode:vi.fn(()=> 'llm_http_429')}));
 vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_context:unknown,_mentioned:boolean,onCost:(cost:number)=>void)=>{
   onCost(0.001);
   return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА'};
@@ -98,6 +101,7 @@ describe('direct mention',()=>{
     expect(generate).not.toHaveBeenCalled();
     expect(replies).toHaveLength(1);
     expect(replies[0]).toContain('лимит');
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'claim_rejected',expect.objectContaining({reason:'chat_daily_budget'}));
   });
   it('acknowledges unavailable generation',async()=>{
     const replies=await send('@DiscoElysiumPersBot','');
