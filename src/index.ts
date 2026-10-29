@@ -83,11 +83,14 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   let cost=0;
   let attemptedTelegramSend=false;
   try {
-    const generated=await generate(env,s,context);
-    cost=generated.cost;
+    const generated=await generate(env,s,context,mentioned,amount=>{cost+=amount;});
     // Enforce the per-request reserve ceiling, even if provider usage surprises us.
     // Cost of the already completed API call is still recorded.
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
+    if(generated.kind==='skip'){
+      await settle(env.DB,id,'failed',cost);
+      return;
+    }
     attemptedTelegramSend=true;
     await sendMessage(env,m.chat.id,m.message_id,generated.text);
     await settle(env.DB,id,'sent',cost);

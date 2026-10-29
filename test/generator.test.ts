@@ -1,0 +1,59 @@
+import {afterEach,describe,it,expect,vi} from 'vitest';
+import {settings,type Env} from '../src/config';
+import {generate} from '../src/generator';
+
+const env={OPENAI_API_KEY:'test'} as Env;
+const s=settings(env);
+const context=[{author:'Аня',body:'Опять опоздал автобус',user_id:1},{author:'Борис',body:'Зато дождь пошёл',user_id:2}];
+function response(content:string,prompt_tokens=100,completion_tokens=50):Response{
+  return new Response(JSON.stringify({choices:[{message:{content}}],usage:{prompt_tokens,completion_tokens}}),{status:200});
+}
+function decision(respond:boolean,voice='ТРЕПЕТ'):string{
+  return JSON.stringify({respond,voice,focus_message:2,topic:'автобус и дождь',mood:'ироничная тоска',angle:'остановка стала главным героем'});
+}
+afterEach(()=>vi.unstubAllGlobals());
+
+describe('two-stage generation',()=>{
+  it('asks the director for a strict decision and uses its chosen voice',async()=>{
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true))).mockResolvedValueOnce(response('ТРЕПЕТ — Успех\nДаже остановка сегодня ждёт чуда.'));
+    vi.stubGlobal('fetch',fetchMock);
+    const costs:number[]=[];
+    const result=await generate(env,s,context,false,cost=>costs.push(cost));
+    expect(result).toMatchObject({kind:'reply',voice:'ТРЕПЕТ'});
+    expect(costs).toHaveLength(2);
+    expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
+    const first=JSON.parse(fetchMock.mock.calls[0][1].body);
+    const second=JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(first.response_format.json_schema.strict).toBe(true);
+    expect(first.response_format.json_schema.schema.properties.voice.enum).toContain('ТРЕПЕТ');
+    expect(first.messages[0].content).toContain('Обычный разговор: можно промолчать');
+    expect(second.response_format).toBeUndefined();
+    expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
+    expect(second.messages[0].content).toContain('остановка стала главным героем');
+    expect(second.messages[1].content).toContain('Главный момент — сообщение 2');
+  });
+  it('skips the writer when the director sees no useful reply',async()=>{
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(false)));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context);
+    expect(result.kind).toBe('skip');
+    expect(result.cost).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it('writes a reply to a direct mention even when the director returns false',async()=>{
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(false,'ЭМПАТИЯ'))).mockResolvedValueOnce(response('ЭМПАТИЯ — Успех\nТебя услышали.'));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context,true);
+    expect(result).toMatchObject({kind:'reply',voice:'ЭМПАТИЯ'});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content).toContain('respond обязан быть true');
+  });
+  it('reports director usage when the writer request fails',async()=>{
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true))).mockResolvedValueOnce(new Response('error',{status:429}));
+    vi.stubGlobal('fetch',fetchMock);
+    const costs:number[]=[];
+    await expect(generate(env,s,context,false,cost=>costs.push(cost))).rejects.toThrow('LLM HTTP 429');
+    expect(costs).toHaveLength(1);
+    expect(costs[0]).toBeGreaterThan(0);
+  });
+});

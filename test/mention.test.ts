@@ -15,9 +15,12 @@ vi.mock('../src/storage',()=>({
   contextMessageLimit:vi.fn(async()=>30),
   setContextMessageLimit:vi.fn(async()=>{})
 }));
-vi.mock('../src/generator',()=>({generate:vi.fn(async()=>({text:'Голос: ответ',cost:0.001}))}));
+vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_context:unknown,_mentioned:boolean,onCost:(cost:number)=>void)=>{
+  onCost(0.001);
+  return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА'};
+})}));
 
-async function send(text:string,apiKey='key'):Promise<string[]>{
+async function send(text:string,apiKey='key',probability='0'):Promise<string[]>{
   const replies:string[]=[];
   vi.stubGlobal('fetch',vi.fn(async(_url:string,options?:{body?:string})=>{
     replies.push(JSON.parse(options!.body!).text);
@@ -29,7 +32,7 @@ async function send(text:string,apiKey='key'):Promise<string[]>{
     body:JSON.stringify({update_id:22,message:{message_id:11,date:now,text,chat:{id:-1001,type:'supergroup'},from:{id:42}}})
   });
   const pending:Promise<unknown>[]=[];
-  const env={DB:{},TELEGRAM_BOT_TOKEN:'test',TELEGRAM_WEBHOOK_SECRET:'secret',OPENAI_API_KEY:apiKey,ALLOWED_CHAT_IDS:'-1001',REPLY_PERCENT:'0'} as unknown as Env;
+  const env={DB:{},TELEGRAM_BOT_TOKEN:'test',TELEGRAM_WEBHOOK_SECRET:'secret',OPENAI_API_KEY:apiKey,ALLOWED_CHAT_IDS:'-1001',REPLY_PERCENT:probability} as unknown as Env;
   const response=await worker.fetch(request,env,{waitUntil:(p:Promise<unknown>)=>{pending.push(p);}} as ExecutionContext);
   expect(response.status).toBe(200);
   await Promise.all(pending);
@@ -54,6 +57,7 @@ describe('direct mention',()=>{
     expect(conversational).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),true);
     expect(generate).toHaveBeenCalledOnce();
+    expect(vi.mocked(generate).mock.calls[0][3]).toBe(true);
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'sent',0.001);
     expect(replies).toEqual(['Голос: ответ']);
   });
@@ -81,5 +85,23 @@ describe('direct mention',()=>{
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'failed',0);
     expect(replies).toHaveLength(1);
     expect(replies[0]).toContain('Не получилось');
+  });
+  it('records the director cost when the writer fails',async()=>{
+    vi.mocked(generate).mockImplementationOnce(async(_env,_s,_context,_mentioned,onCost)=>{
+      onCost?.(0.0007);
+      throw Error('LLM HTTP 429');
+    });
+    const replies=await send('@DiscoElysiumPersBot');
+    expect(settle).toHaveBeenCalledWith(expect.anything(),1,'failed',0.0007);
+    expect(replies[0]).toContain('Не получилось');
+  });
+  it('stays silent after the director skips an ordinary conversation',async()=>{
+    vi.mocked(conversational).mockReturnValueOnce(true);
+    vi.mocked(generate).mockImplementationOnce(async(_env,_s,_context,_mentioned,onCost)=>{
+      onCost?.(0.0005);
+      return {kind:'skip',cost:0.0005};
+    });
+    expect(await send('Дождь опять пошёл','key','100')).toEqual([]);
+    expect(settle).toHaveBeenCalledWith(expect.anything(),1,'failed',0.0005);
   });
 });
