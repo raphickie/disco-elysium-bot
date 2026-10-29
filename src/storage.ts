@@ -1,6 +1,7 @@
 import type {Settings} from './config';
 import type {TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
+import {DEFAULT_CONTEXT_MESSAGES,MAX_CONTEXT_MESSAGES} from './context';
 
 export async function store(db:D1Database,updateId:number,m:TelegramMessage):Promise<boolean>{
   const name=[m.from?.first_name,m.from?.last_name].filter(Boolean).join(' ').slice(0,60) || m.from?.username?.slice(0,60) || 'Аноним';
@@ -11,10 +12,25 @@ export async function store(db:D1Database,updateId:number,m:TelegramMessage):Pro
   return result.meta.changes===1;
 }
 
-export async function recent(db:D1Database,chatId:number,s:Settings,now:number):Promise<ContextMessage[]>{
+export async function contextMessageLimit(db:D1Database,chatId:number):Promise<number>{
+  const row=await db.prepare('SELECT context_messages FROM chat_settings WHERE chat_id=?')
+    .bind(chatId).first<{context_messages:number}>();
+  return row?.context_messages??DEFAULT_CONTEXT_MESSAGES;
+}
+
+export async function setContextMessageLimit(db:D1Database,chatId:number,limit:number,now:number):Promise<void>{
+  if(!Number.isInteger(limit)||limit<3||limit>MAX_CONTEXT_MESSAGES)
+    throw Error('Invalid context message limit');
+  await db.prepare(`INSERT INTO chat_settings(chat_id,context_messages,updated_at)
+    VALUES(?,?,?) ON CONFLICT(chat_id) DO UPDATE SET
+    context_messages=excluded.context_messages,updated_at=excluded.updated_at`)
+    .bind(chatId,limit,now).run();
+}
+
+export async function recent(db:D1Database,chatId:number,s:Settings,now:number,limit:number):Promise<ContextMessage[]>{
   const result=await db.prepare(
     'SELECT author,body,user_id FROM messages WHERE chat_id=? AND created_at>=? ORDER BY created_at DESC,message_id DESC LIMIT ?'
-  ).bind(chatId,now-s.contextWindow,s.contextCount).all<ContextMessage>();
+  ).bind(chatId,now-s.contextWindow,limit).all<ContextMessage>();
   return result.results.reverse();
 }
 

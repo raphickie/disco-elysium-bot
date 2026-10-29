@@ -1,7 +1,8 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
-import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand} from './telegram';
-import {store,recent,conversational,claim,settle,cleanup} from './storage';
+import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,commandTargetsBot,isChatAdmin} from './telegram';
+import {store,recent,conversational,claim,settle,cleanup,contextMessageLimit,setContextMessageLimit} from './storage';
 import {generate} from './generator';
+import {parseContextCommand,type ContextCommand} from './context';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
   if(!m||!['group','supergroup'].includes(m.chat.type))return false;
@@ -9,6 +10,31 @@ function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
   const text=(m.text??m.caption??'').trim();
   if(!text||text.startsWith('/'))return false;
   return true;
+}
+
+async function handleContextCommand(m:TelegramMessage,command:ContextCommand,env:Env,now:number):Promise<void>{
+  if(!await commandTargetsBot(env,command.target))return;
+  if(command.kind==='invalid'){
+    await sendMessage(env,m.chat.id,m.message_id,command.message);
+    return;
+  }
+  if(command.kind==='show'){
+    const limit=await contextMessageLimit(env.DB,m.chat.id);
+    await sendMessage(env,m.chat.id,m.message_id,`Сейчас в контексте до ${limit} сообщений. Изменить: /context_messages <3–70>.`);
+    return;
+  }
+  let admin:boolean;
+  try{admin=await isChatAdmin(env,m.chat.id,m.from!.id);}
+  catch{
+    await sendMessage(env,m.chat.id,m.message_id,'Не удалось проверить права администратора. Попробуй позже.');
+    return;
+  }
+  if(!admin){
+    await sendMessage(env,m.chat.id,m.message_id,'Менять размер контекста может только администратор чата.');
+    return;
+  }
+  await setContextMessageLimit(env.DB,m.chat.id,command.value,now);
+  await sendMessage(env,m.chat.id,m.message_id,`Готово: теперь беру до ${command.value} последних сообщений за 20 минут.`);
 }
 
 async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
@@ -33,10 +59,14 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     return;
   }
 
-  if(!isGroup||!validMessage(m))return;
+  if(!isGroup)return;
+  const command=parseContextCommand(m.text??'');
+  if(command){await handleContextCommand(m,command,env,now);return;}
+  if(!validMessage(m))return;
   if(!await store(env.DB,update.update_id,m))return;
   if(!env.OPENAI_API_KEY||!shouldReply(s.probability,Math.random()))return;
-  const context=await recent(env.DB,m.chat.id,s,now);
+  const limit=await contextMessageLimit(env.DB,m.chat.id);
+  const context=await recent(env.DB,m.chat.id,s,now,limit);
   if(!conversational(context))return;
 
   const id=await claim(env.DB,m.chat.id,m.message_id,now,s);

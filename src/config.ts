@@ -7,7 +7,6 @@ export interface Env {
   ALLOWED_CHAT_IDS?: string;
   REPLY_PERCENT?: string;
   COOLDOWN_SECONDS?: string;
-  CONTEXT_MESSAGES?: string;
   CONTEXT_WINDOW_MINUTES?: string;
   HISTORY_HOURS?: string;
   CHAT_DAILY_USD?: string;
@@ -21,7 +20,7 @@ export interface Env {
 }
 export type Settings = {
   whitelistEnabled:boolean; allowedChatIds:Set<string>; probability:number; cooldown:number;
-  contextCount:number; contextWindow:number; historySeconds:number;
+  contextWindow:number; historySeconds:number;
   chatDaily:number; chatMonthly:number; globalDaily:number; globalMonthly:number;
   reserve:number; model:string; inputRate:number; outputRate:number;
 };
@@ -37,7 +36,6 @@ export function settings(e:Env):Settings {
     allowedChatIds:new Set((e.ALLOWED_CHAT_IDS??'').split(',').map(x=>x.trim()).filter(Boolean)),
     probability:number(e.REPLY_PERCENT,1,0,100),
     cooldown:number(e.COOLDOWN_SECONDS,900,0,86400),
-    contextCount:number(e.CONTEXT_MESSAGES,12,3,30),
     contextWindow:number(e.CONTEXT_WINDOW_MINUTES,20,1,120)*60,
     historySeconds:number(e.HISTORY_HOURS,48,1,168)*3600,
     chatDaily:number(e.CHAT_DAILY_USD,0.1,0,10000),

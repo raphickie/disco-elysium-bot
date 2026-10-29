@@ -10,6 +10,26 @@ export type TelegramUpdate={update_id:number;message?:TelegramMessage};
 export function isPingCommand(text:string|undefined):boolean {
   return typeof text==='string' && text.trim().toLowerCase()==='/ping';
 }
+export async function commandTargetsBot(env:Env,target?:string):Promise<boolean>{
+  if(!target)return true;
+  const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`);
+  if(!r.ok)throw Error(`Telegram getMe HTTP ${r.status}`);
+  const data=await r.json() as {ok?:boolean;result?:{username?:string}};
+  if(!data.ok||!data.result?.username)throw Error('Telegram getMe failed');
+  return data.result.username.toLowerCase()===target.toLowerCase();
+}
+
+export async function isChatAdmin(env:Env,chatId:number,userId:number):Promise<boolean>{
+  const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getChatMember`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chat_id:chatId,user_id:userId})
+  });
+  if(!r.ok)throw Error(`Telegram getChatMember HTTP ${r.status}`);
+  const data=await r.json() as {ok?:boolean;result?:{status?:string}};
+  if(!data.ok||!data.result?.status)throw Error('Telegram getChatMember failed');
+  return data.result.status==='creator'||data.result.status==='administrator';
+}
+
 export async function sendMessage(env:Env,chatId:number,replyTo:number,text:string):Promise<void>{
   const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{
     method:'POST',headers:{'Content-Type':'application/json'},
