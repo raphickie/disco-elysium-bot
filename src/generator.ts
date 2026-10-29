@@ -1,5 +1,6 @@
 import type {Env,Settings} from './config';
 import {VOICES,directorPrompt,systemPrompt,type Voice} from './voices';
+import {selectReferences,referencePrompt,copiesReference} from './references';
 export type ContextMessage={author:string;body:string;user_id:number};
 export type Generated={kind:'reply';text:string;cost:number;voice:Voice}|{kind:'skip';cost:number};
 type Decision={respond:boolean;voice:Voice;focus_message:number;topic:string;mood:string;angle:string};
@@ -55,10 +56,20 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],menti
   if(cost>s.reserve)throw Error('Director cost exceeded configured per-call reserve');
   if(!decision.respond&&!mentioned)return {kind:'skip',cost};
   const focus=Math.min(context.length,Math.max(1,decision.focus_message));
+  const query=[decision.topic,decision.mood,decision.angle,context[focus-1]?.body??''].join(' ');
+  const selected=selectReferences(decision.voice,query,5);
   // A direct mention always gets a real reply, regardless of the model's boolean.
-  const text=(await complete(env,s,[
-    {role:'system',content:systemPrompt(decision.voice,decision.topic,decision.mood,decision.angle)},
-    {role:'user',content:`${quoted}\n\nГлавный момент — сообщение ${focus}. Напиши одну реплику на актуальный момент разговора.`}
-  ],220,record)).slice(0,650);
+  const write=(examples:typeof selected,retry=false)=>complete(env,s,[
+    {role:'system',content:systemPrompt(decision.voice,decision.topic,decision.mood,decision.angle,referencePrompt(decision.voice,examples))},
+    {role:'user',content:`${quoted}\n\nГлавный момент — сообщение ${focus}. Напиши одну новую реплику на актуальный момент разговора.${retry?' Предыдущий вариант слишком дословно повторил пример. Сохрани характер голоса, но найди другую формулировку.':''}`}
+  ],250,record);
+  let text=(await write(selected)).slice(0,550);
+  if(copiesReference(text,selected)){
+    if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
+    const alternatives=selectReferences(decision.voice,query,9).filter(ref=>!copiesReference(text,[ref])).slice(0,5);
+    if(alternatives.length<5)throw Error('No safe reference alternatives');
+    text=(await write(alternatives,true)).slice(0,550);
+    if(copiesReference(text,selected)||copiesReference(text,alternatives))throw Error('LLM copied a game reference');
+  }
   return {kind:'reply',text,cost,voice:decision.voice};
 }

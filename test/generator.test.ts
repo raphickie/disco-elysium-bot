@@ -1,6 +1,8 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
 import {settings,type Env} from '../src/config';
 import {generate} from '../src/generator';
+import {selectReferences,copiesReference} from '../src/references';
+import {VOICES} from '../src/voices';
 
 const env={OPENAI_API_KEY:'test'} as Env;
 const s=settings(env);
@@ -30,6 +32,8 @@ describe('two-stage generation',()=>{
     expect(second.response_format).toBeUndefined();
     expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
     expect(second.messages[0].content).toContain('остановка стала главным героем');
+    expect(second.messages[0].content).toContain('result/Shivers.json:');
+    expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(5);
     expect(second.messages[1].content).toContain('Главный момент — сообщение 2');
   });
   it('skips the writer when the director sees no useful reply',async()=>{
@@ -55,5 +59,34 @@ describe('two-stage generation',()=>{
     await expect(generate(env,s,context,false,cost=>costs.push(cost))).rejects.toThrow('LLM HTTP 429');
     expect(costs).toHaveLength(1);
     expect(costs[0]).toBeGreaterThan(0);
+  });
+  it('regenerates once when the writer copies a game line',async()=>{
+    const query='автобус и дождь ироничная тоска остановка стала главным героем Зато дождь пошёл';
+    const copied=selectReferences('ТРЕПЕТ',query)[0].text;
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true)))
+      .mockResolvedValueOnce(response(`ТРЕПЕТ — Успех\n${copied}`))
+      .mockResolvedValueOnce(response('ТРЕПЕТ — Успех\nУ остановки сегодня собственный прогноз: ждать вечно.'));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context);
+    expect(result.kind).toBe('reply');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).messages[1].content).toContain('слишком дословно');
+  });
+});
+
+describe('curated game references',()=>{
+  it('has enough source-linked examples for every active voice',()=>{
+    for(const voice of VOICES){
+      const refs=selectReferences(voice,'дождь спор вечеринка',5);
+      expect(refs).toHaveLength(5);
+      expect(new Set(refs.map(r=>r.line)).size).toBe(5);
+      expect(refs.every(r=>r.text.length>20)).toBe(true);
+    }
+  });
+  it('ranks a topical example and detects a copied line',()=>{
+    const refs=selectReferences('ТРЕПЕТ','дождь снег остановка город',5);
+    expect(refs.some(ref=>ref.line===209)).toBe(true);
+    expect(copiesReference(`ТРЕПЕТ — Успех\n${refs[0].text}`,refs)).toBe(true);
+    expect(copiesReference('ТРЕПЕТ — Успех\nУ дождя сегодня смена без выходных.',refs)).toBe(false);
   });
 });
