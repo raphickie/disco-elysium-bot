@@ -98,9 +98,11 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(!validMessage(m))return;
   if(!await store(env.DB,update.update_id,m))return;
   const mentioned=mentionsBot(m.text??m.caption);
+  let mustReply=mentioned;
   if(!mentioned){
     const probability=await replyProbability(env.DB,m.chat.id,s.probability);
     if(!shouldReply(probability,Math.random()))return;
+    mustReply=probability===100;
   }
   if(!env.OPENAI_API_KEY){
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
@@ -108,9 +110,9 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   }
   const limit=await contextMessageLimit(env.DB,m.chat.id);
   const context=await recent(env.DB,m.chat.id,s,now,limit);
-  if(!mentioned&&!conversational(context))return;
+  if(!mustReply&&!conversational(context))return;
 
-  const id=await claim(env.DB,m.chat.id,m.message_id,now,s,mentioned);
+  const id=await claim(env.DB,m.chat.id,m.message_id,now,s,mustReply);
   if(id===null){
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
     return;
@@ -119,7 +121,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   let cost=0;
   let attemptedTelegramSend=false;
   try {
-    const generated=await generate(env,s,context,mentioned,amount=>{cost+=amount;});
+    const generated=await generate(env,s,context,mustReply,amount=>{cost+=amount;});
     // Enforce the per-request reserve ceiling, even if provider usage surprises us.
     // Cost of the already completed API call is still recorded.
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');

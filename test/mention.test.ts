@@ -43,7 +43,7 @@ async function send(text:string,apiKey='key',probability='0'):Promise<string[]>{
 }
 
 beforeEach(()=>vi.clearAllMocks());
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 
 describe('direct mention',()=>{
   it('matches the exact bot username',()=>{
@@ -71,16 +71,26 @@ describe('direct mention',()=>{
     expect(generate).not.toHaveBeenCalled();
     expect(claim).not.toHaveBeenCalled();
   });
-  it('uses the chat override for ordinary messages',async()=>{
+  it('treats a 100% chat override as a required reply even with one user message',async()=>{
     vi.mocked(replyProbability).mockResolvedValueOnce(100);
-    vi.mocked(conversational).mockReturnValueOnce(true);
     expect(await send('Обычное сообщение','key','0')).toEqual(['Голос: ответ']);
+    expect(conversational).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),true);
     expect(generate).toHaveBeenCalledOnce();
+    expect(vi.mocked(generate).mock.calls[0][3]).toBe(true);
   });
   it('lets a chat override disable ordinary replies',async()=>{
     vi.mocked(replyProbability).mockResolvedValueOnce(0);
     expect(await send('Обычное сообщение','key','100')).toEqual([]);
     expect(generate).not.toHaveBeenCalled();
+  });
+  it('keeps activity and cooldown gates below 100%',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0);
+    vi.mocked(replyProbability).mockResolvedValueOnce(50);
+    vi.mocked(conversational).mockReturnValueOnce(true);
+    expect(await send('Обычное сообщение','key','0')).toEqual(['Голос: ответ']);
+    expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),false);
+    expect(vi.mocked(generate).mock.calls[0][3]).toBe(false);
   });
   it('acknowledges a budget or concurrency rejection',async()=>{
     vi.mocked(claim).mockResolvedValueOnce(null);
@@ -112,12 +122,13 @@ describe('direct mention',()=>{
     expect(replies[0]).toContain('Не получилось');
   });
   it('stays silent after the director skips an ordinary conversation',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0);
     vi.mocked(conversational).mockReturnValueOnce(true);
     vi.mocked(generate).mockImplementationOnce(async(_env,_s,_context,_mentioned,onCost)=>{
       onCost?.(0.0005);
       return {kind:'skip',cost:0.0005};
     });
-    expect(await send('Дождь опять пошёл','key','100')).toEqual([]);
+    expect(await send('Дождь опять пошёл','key','50')).toEqual([]);
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'failed',0.0005);
   });
 });
