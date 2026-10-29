@@ -26,10 +26,12 @@ vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_c
   return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА',candidates:['ЛОГИКА','ДРАМА','ТРЕПЕТ']};
 })}));
 
-async function send(text:string,apiKey='key',probability='0'):Promise<string[]>{
+async function send(text:string,apiKey='key',probability='0',photoFails=false):Promise<string[]>{
   const replies:string[]=[];
   vi.stubGlobal('fetch',vi.fn(async(_url:string,options?:{body?:string})=>{
-    replies.push(JSON.parse(options!.body!).text);
+    if(photoFails&&_url.endsWith('/sendPhoto'))return new Response('Photo error',{status:400});
+    const payload=JSON.parse(options!.body!);
+    replies.push(payload.text??payload.caption);
     return new Response(JSON.stringify({ok:true}),{status:200});
   }));
   const now=Math.floor(Date.now()/1000);
@@ -66,7 +68,14 @@ describe('direct mention',()=>{
     expect(generate).toHaveBeenCalledOnce();
     expect(vi.mocked(generate).mock.calls[0][3]).toBe(true);
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'sent',0.001);
-    expect(replies).toEqual(['Голос: ответ']);
+    expect(replies).toEqual(['ЛОГИКА\nГолос: ответ']);
+    const [url,init]=vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe('https://api.telegram.org/bottest/sendPhoto');
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      chat_id:-1001,
+      photo:'https://raw.githubusercontent.com/raphickie/disco-elysium-bot/master/assets/portraits/logic.png',
+      reply_parameters:{message_id:11}
+    });
   });
   it('keeps ordinary messages under the probability gate',async()=>{
     expect(await send('Обычное сообщение')).toEqual([]);
@@ -76,7 +85,7 @@ describe('direct mention',()=>{
   });
   it('treats a 100% chat override as a required reply even with one user message',async()=>{
     vi.mocked(replyProbability).mockResolvedValueOnce(100);
-    expect(await send('Обычное сообщение','key','0')).toEqual(['Голос: ответ']);
+    expect(await send('Обычное сообщение','key','0')).toEqual(['ЛОГИКА\nГолос: ответ']);
     expect(conversational).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),true);
     expect(generate).toHaveBeenCalledOnce();
@@ -91,9 +100,19 @@ describe('direct mention',()=>{
     vi.spyOn(Math,'random').mockReturnValue(0);
     vi.mocked(replyProbability).mockResolvedValueOnce(50);
     vi.mocked(conversational).mockReturnValueOnce(true);
-    expect(await send('Обычное сообщение','key','0')).toEqual(['Голос: ответ']);
+    expect(await send('Обычное сообщение','key','0')).toEqual(['ЛОГИКА\nГолос: ответ']);
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),false);
     expect(vi.mocked(generate).mock.calls[0][3]).toBe(false);
+  });
+  it('falls back to text when Telegram cannot download the portrait',async()=>{
+    const replies=await send('@DiscoElysiumPersBot','key','0',true);
+    expect(replies).toEqual(['Голос: ответ']);
+    expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual([
+      'https://api.telegram.org/bottest/sendPhoto',
+      'https://api.telegram.org/bottest/sendMessage'
+    ]);
+    expect(settle).toHaveBeenCalledWith(expect.anything(),1,'sent',0.001);
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({delivery:'text_fallback',voice:'ЛОГИКА'}));
   });
   it('acknowledges a budget or concurrency rejection',async()=>{
     vi.mocked(claim).mockResolvedValueOnce(null);

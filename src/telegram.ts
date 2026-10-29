@@ -1,4 +1,6 @@
 import type {Env} from './config';
+import type {Voice} from './voices';
+import {portraitUrl,formatSkillCaption} from './portraits';
 export type TelegramMessage={
   message_id:number;date:number;text?:string;caption?:string;
   chat:{id:number;type:string};
@@ -41,4 +43,21 @@ export async function sendMessage(env:Env,chatId:number,replyTo:number,text:stri
   if(!r.ok)throw Error(`Telegram HTTP ${r.status}`);
   const data=await r.json() as {ok?:boolean};
   if(!data.ok)throw Error('Telegram rejected message');
+}
+
+
+// Caption and photo are a single Telegram message; the caption is shown below the portrait.
+export async function sendSkillPhoto(env:Env,chatId:number,replyTo:number,voice:Voice,text:string):Promise<void>{
+  const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      chat_id:chatId,
+      photo:portraitUrl(voice),
+      caption:formatSkillCaption(voice,text),
+      reply_parameters:{message_id:replyTo,allow_sending_without_reply:true}
+    })
+  });
+  if(!r.ok)throw Error(`Telegram HTTP ${r.status}`);
+  const data=await r.json() as {ok?:boolean};
+  if(!data.ok)throw Error('Telegram rejected photo');
 }
