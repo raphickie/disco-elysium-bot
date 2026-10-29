@@ -7,7 +7,7 @@
   "triggers": {"crons":["*/10 * * * *"]},
   "vars": {
     "WHITELIST_ENABLED":"true",
-    "ALLOWED_CHAT_IDS":"",
+    "ALLOWED_CHAT_IDS":"-1001890425588",
     "REPLY_PERCENT":"1",
     "COOLDOWN_SECONDS":"900",
     "CONTEXT_WINDOW_MINUTES":"20",
