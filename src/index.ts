@@ -1,5 +1,5 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
-import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
+import {type TelegramUpdate,type TelegramMessage,sendMessage,sendSkillPhoto,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
 import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
@@ -155,10 +155,18 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     }
     attemptedTelegramSend=true;
     stage='telegram_send';
-    await sendMessage(env,m.chat.id,m.message_id,generated.text);
+    let delivery:'photo'|'text_fallback'='photo';
+    try {
+      await sendSkillPhoto(env,m.chat.id,m.message_id,generated.voice,generated.text);
+    } catch(photoError) {
+      // A blocked/unavailable image must not eat an otherwise valid LLM answer.
+      console.warn('Telegram skill photo failed, using text fallback:',errorCode(photoError));
+      delivery='text_fallback';
+      await sendMessage(env,m.chat.id,m.message_id,generated.text);
+    }
     stage='settlement';
     await settle(env.DB,id,'sent',cost);
-    logReply(m,'sent',{mode,voice:generated.voice,candidates:generated.candidates,cost_usd:cost});
+    logReply(m,'sent',{mode,voice:generated.voice,candidates:generated.candidates,delivery,cost_usd:cost});
   }catch(e){
     logReply(m,'failed',{mode,stage,error_code:errorCode(e),cost_usd:cost});
     await settle(env.DB,id,'failed',cost);
