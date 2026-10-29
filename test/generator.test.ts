@@ -27,6 +27,14 @@ describe('two-stage generation',()=>{
     expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
     const first=JSON.parse(fetchMock.mock.calls[0][1].body);
     const second=JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(first.model).toBe('gpt-6-luna');
+    expect(first.reasoning_effort).toBe('none');
+    expect(first.max_completion_tokens).toBe(250);
+    expect(second.model).toBe('gpt-6.1-sol');
+    expect(second.reasoning_effort).toBe('low');
+    expect(second.max_completion_tokens).toBe(1200);
+    expect(costs[0]).toBeCloseTo((100*0.1+50*0.5)/1_000_000);
+    expect(costs[1]).toBeCloseTo((100*2+50*10)/1_000_000);
     expect(first.response_format.json_schema.strict).toBe(true);
     expect(first.response_format.json_schema.schema.properties.voice.enum).toContain('ТРЕПЕТ');
     expect(first.messages[0].content).toContain('Обычный разговор: можно промолчать');
@@ -34,7 +42,7 @@ describe('two-stage generation',()=>{
     expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
     expect(second.messages[0].content).toContain('остановка стала главным героем');
     expect(second.messages[0].content).toContain('result/Shivers.json:');
-    expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(8);
+    expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(15);
     expect(second.messages[1].content).toContain('Главный момент — сообщение 2');
   });
   it('skips the writer when the director sees no useful reply',async()=>{

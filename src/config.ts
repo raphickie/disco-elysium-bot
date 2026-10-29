@@ -14,15 +14,20 @@ export interface Env {
   GLOBAL_DAILY_USD?: string;
   GLOBAL_MONTHLY_USD?: string;
   RESERVED_USD_PER_CALL?: string;
-  OPENAI_MODEL?: string;
-  OPENAI_INPUT_USD_PER_MILLION?: string;
-  OPENAI_OUTPUT_USD_PER_MILLION?: string;
+  OPENAI_DIRECTOR_MODEL?: string;
+  OPENAI_WRITER_MODEL?: string;
+  OPENAI_DIRECTOR_INPUT_USD_PER_MILLION?: string;
+  OPENAI_DIRECTOR_OUTPUT_USD_PER_MILLION?: string;
+  OPENAI_WRITER_INPUT_USD_PER_MILLION?: string;
+  OPENAI_WRITER_OUTPUT_USD_PER_MILLION?: string;
 }
 export type Settings = {
   whitelistEnabled:boolean; allowedChatIds:Set<string>; probability:number; cooldown:number;
   contextWindow:number; historySeconds:number;
   chatDaily:number; chatMonthly:number; globalDaily:number; globalMonthly:number;
-  reserve:number; model:string; inputRate:number; outputRate:number;
+  reserve:number;
+  director:{model:string; inputRate:number; outputRate:number; reasoningEffort:'none'};
+  writer:{model:string; inputRate:number; outputRate:number; reasoningEffort:'low'};
 };
 function number(v:string|undefined,fallback:number,min:number,max:number):number {
   if(v===undefined || v.trim()==='')return fallback;
@@ -42,10 +47,19 @@ export function settings(e:Env):Settings {
     chatMonthly:number(e.CHAT_MONTHLY_USD,1,0,10000),
     globalDaily:number(e.GLOBAL_DAILY_USD,1,0,10000),
     globalMonthly:number(e.GLOBAL_MONTHLY_USD,10,0,10000),
-    reserve:number(e.RESERVED_USD_PER_CALL,0.02,0.00001,10),
-    model:e.OPENAI_MODEL??'gpt-4.1-mini',
-    inputRate:number(e.OPENAI_INPUT_USD_PER_MILLION,0.4,0,10000),
-    outputRate:number(e.OPENAI_OUTPUT_USD_PER_MILLION,1.6,0,10000),
+    reserve:number(e.RESERVED_USD_PER_CALL,0.05,0.00001,10),
+    director:{
+      model:e.OPENAI_DIRECTOR_MODEL??'gpt-6-luna',
+      inputRate:number(e.OPENAI_DIRECTOR_INPUT_USD_PER_MILLION,0.1,0,10000),
+      outputRate:number(e.OPENAI_DIRECTOR_OUTPUT_USD_PER_MILLION,0.5,0,10000),
+      reasoningEffort:'none'
+    },
+    writer:{
+      model:e.OPENAI_WRITER_MODEL??'gpt-6.1-sol',
+      inputRate:number(e.OPENAI_WRITER_INPUT_USD_PER_MILLION,2,0,10000),
+      outputRate:number(e.OPENAI_WRITER_OUTPUT_USD_PER_MILLION,10,0,10000),
+      reasoningEffort:'low'
+    },
   };
 }
 export function isAllowed(chatId:number,s:Settings):boolean {

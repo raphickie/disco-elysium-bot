@@ -30,3 +30,27 @@ describe('conversation',()=>{
     expect(conversational([m(1),m(2),m(1)])).toBe(true);
   });
 });
+
+
+describe('stage-specific OpenAI models and pricing',()=>{
+  it('defaults to Luna for direction and Sol for writing',()=>{
+    const s=settings({} as Env);
+    expect(s.director).toEqual({model:'gpt-6-luna',inputRate:0.1,outputRate:0.5,reasoningEffort:'none'});
+    expect(s.writer).toEqual({model:'gpt-6.1-sol',inputRate:2,outputRate:10,reasoningEffort:'low'});
+    expect(s.reserve).toBe(0.05);
+  });
+  it('allows stage-specific pricing overrides',()=>{
+    const s=settings({
+      OPENAI_DIRECTOR_MODEL:'gpt-4.1-mini',
+      OPENAI_DIRECTOR_INPUT_USD_PER_MILLION:'0.40',
+      OPENAI_DIRECTOR_OUTPUT_USD_PER_MILLION:'1.60',
+      OPENAI_WRITER_MODEL:'gpt-6.1-sol',
+      OPENAI_WRITER_INPUT_USD_PER_MILLION:'2.00',
+      OPENAI_WRITER_OUTPUT_USD_PER_MILLION:'10.00'
+    } as Env);
+    expect(s.director.inputRate).toBe(0.4);
+    expect(s.director.outputRate).toBe(1.6);
+    expect(s.director.model).toBe('gpt-4.1-mini');
+    expect(s.writer.model).toBe('gpt-6.1-sol');
+  });
+});
