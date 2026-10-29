@@ -1,7 +1,7 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
 import worker from '../src/index';
 import {mentionsBot} from '../src/telegram';
-import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability} from '../src/storage';
+import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability,chatDailyLimit} from '../src/storage';
 import {generate} from '../src/generator';
 import {logReply} from '../src/logging';
 import type {Env} from '../src/config';
@@ -15,6 +15,7 @@ vi.mock('../src/storage',()=>({
   settle:vi.fn(async()=>{}),
   cleanup:vi.fn(async()=>{}),
   contextMessageLimit:vi.fn(async()=>30),
+  chatDailyLimit:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
   setContextMessageLimit:vi.fn(async()=>{}),
   replyProbability:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
   setReplyProbability:vi.fn(async()=>{}),
@@ -90,6 +91,12 @@ describe('direct mention',()=>{
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),true);
     expect(generate).toHaveBeenCalledOnce();
     expect(vi.mocked(generate).mock.calls[0][3]).toBe(true);
+  });
+  it('passes the per-chat daily limit into the atomic budget claim',async()=>{
+    vi.mocked(chatDailyLimit).mockResolvedValueOnce(0.8);
+    await send('@DiscoElysiumPersBot');
+    expect(chatDailyLimit).toHaveBeenCalledWith(expect.anything(),-1001,0.1);
+    expect(vi.mocked(claim).mock.calls[0][4].chatDaily).toBe(0.8);
   });
   it('lets a chat override disable ordinary replies',async()=>{
     vi.mocked(replyProbability).mockResolvedValueOnce(0);

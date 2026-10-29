@@ -20,6 +20,7 @@ describe('claim rejection diagnosis',()=>{
   });
   it('distinguishes a chat budget from a simultaneous generation',async()=>{
     expect(await diagnoseClaimRejection(db({chat_day_usd:0.09}),-1001,7,1_700_000_000,s,true)).toBe('chat_daily_budget');
+    expect(await diagnoseClaimRejection(db({chat_day_usd:0.09}),-1001,7,1_700_000_000,{...s,chatDaily:0.8},true)).toBe('unknown');
     expect(await diagnoseClaimRejection(db({chat_day_usd:0.09,pending_count:1}),-1001,7,1_700_000_000,s,true)).toBe('already_generating');
   });
 });

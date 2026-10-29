@@ -3,6 +3,12 @@ import type {TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
 import {DEFAULT_CONTEXT_MESSAGES,MAX_CONTEXT_MESSAGES} from './context';
 
+export async function chatDailyLimit(db:D1Database,chatId:number,fallback:number):Promise<number>{
+  const row=await db.prepare('SELECT chat_daily_usd FROM chat_settings WHERE chat_id=?')
+    .bind(chatId).first<{chat_daily_usd:number|null}>();
+  return row?.chat_daily_usd??fallback;
+}
+
 export async function replyProbability(db:D1Database,chatId:number,fallback:number):Promise<number>{
   const row=await db.prepare('SELECT reply_percent FROM chat_settings WHERE chat_id=?')
     .bind(chatId).first<{reply_percent:number|null}>();

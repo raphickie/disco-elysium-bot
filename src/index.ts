@@ -1,6 +1,6 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
 import {type TelegramUpdate,type TelegramMessage,sendMessage,sendSkillPhoto,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
-import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability} from './storage';
+import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability,chatDailyLimit} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
 import {parseProbabilityCommand,type ProbabilityCommand} from './probability';
@@ -130,10 +130,11 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     return;
   }
 
-  const id=await claim(env.DB,m.chat.id,m.message_id,now,s,mustReply);
+  const budgetSettings={...s,chatDaily:await chatDailyLimit(env.DB,m.chat.id,s.chatDaily)};
+  const id=await claim(env.DB,m.chat.id,m.message_id,now,budgetSettings,mustReply);
   if(id===null){
     let reason='unknown';
-    try{reason=await diagnoseClaimRejection(env.DB,m.chat.id,m.message_id,now,s,mustReply);}
+    try{reason=await diagnoseClaimRejection(env.DB,m.chat.id,m.message_id,now,budgetSettings,mustReply);}
     catch{/* Keep the original claim result if diagnosis fails. */}
     logReply(m,'claim_rejected',{mode,reason,probability});
     if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
