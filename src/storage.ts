@@ -47,16 +47,16 @@ function dateKeys(now:number):{day:string;month:string}{
 // A partial unique index prevents simultaneous generations for the same chat.
 // Budget checks include pending reservations so concurrent chats cannot overspend.
 export async function claim(
-  db:D1Database,chatId:number,messageId:number,now:number,s:Settings
+  db:D1Database,chatId:number,messageId:number,now:number,s:Settings,ignoreCooldown=false
 ):Promise<number|null>{
   const {day,month}=dateKeys(now);
   const sql=`
 INSERT OR IGNORE INTO reply_attempts(chat_id,message_id,created_at,day_key,month_key,status,reserved_usd,actual_usd)
 SELECT ?,?,?,?,?,'pending',?,0
-WHERE NOT EXISTS(
+WHERE (?=1 OR NOT EXISTS(
   SELECT 1 FROM reply_attempts
   WHERE chat_id=? AND status='sent' AND created_at>?
-)
+))
 AND (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0)
      FROM reply_attempts WHERE chat_id=? AND day_key=?) + ? <= ?
 AND (SELECT COALESCE(SUM(CASE WHEN status='pending' THEN reserved_usd ELSE actual_usd END),0)
@@ -69,7 +69,7 @@ RETURNING id`;
   try {
     const row=await db.prepare(sql).bind(
       chatId,messageId,now,day,month,s.reserve,
-      chatId,now-s.cooldown,
+      ignoreCooldown?1:0,chatId,now-s.cooldown,
       chatId,day,s.reserve,s.chatDaily,
       chatId,month,s.reserve,s.chatMonthly,
       day,s.reserve,s.globalDaily,

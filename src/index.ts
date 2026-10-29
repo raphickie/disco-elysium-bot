@@ -1,5 +1,5 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
-import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,commandTargetsBot,isChatAdmin} from './telegram';
+import {type TelegramUpdate,type TelegramMessage,sendMessage,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
 import {store,recent,conversational,claim,settle,cleanup,contextMessageLimit,setContextMessageLimit} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
@@ -64,26 +64,38 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(command){await handleContextCommand(m,command,env,now);return;}
   if(!validMessage(m))return;
   if(!await store(env.DB,update.update_id,m))return;
-  if(!env.OPENAI_API_KEY||!shouldReply(s.probability,Math.random()))return;
+  const mentioned=mentionsBot(m.text??m.caption);
+  if(!mentioned&&!shouldReply(s.probability,Math.random()))return;
+  if(!env.OPENAI_API_KEY){
+    if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
+    return;
+  }
   const limit=await contextMessageLimit(env.DB,m.chat.id);
   const context=await recent(env.DB,m.chat.id,s,now,limit);
-  if(!conversational(context))return;
+  if(!mentioned&&!conversational(context))return;
 
-  const id=await claim(env.DB,m.chat.id,m.message_id,now,s);
-  if(id===null)return;
+  const id=await claim(env.DB,m.chat.id,m.message_id,now,s,mentioned);
+  if(id===null){
+    if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
+    return;
+  }
 
   let cost=0;
+  let attemptedTelegramSend=false;
   try {
     const generated=await generate(env,s,context);
     cost=generated.cost;
     // Enforce the per-request reserve ceiling, even if provider usage surprises us.
     // Cost of the already completed API call is still recorded.
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
+    attemptedTelegramSend=true;
     await sendMessage(env,m.chat.id,m.message_id,generated.text);
     await settle(env.DB,id,'sent',cost);
   }catch(e){
     console.error('Reply failed:',String(e));
     await settle(env.DB,id,'failed',cost);
+    if(mentioned&&!attemptedTelegramSend)
+      await sendMessage(env,m.chat.id,m.message_id,'Не получилось сгенерировать ответ. Попробуй ещё раз позже.');
   }
 }
 

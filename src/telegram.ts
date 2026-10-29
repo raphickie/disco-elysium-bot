@@ -10,6 +10,9 @@ export type TelegramUpdate={update_id:number;message?:TelegramMessage};
 export function isPingCommand(text:string|undefined):boolean {
   return typeof text==='string' && text.trim().toLowerCase()==='/ping';
 }
+export function mentionsBot(text:string|undefined):boolean {
+  return typeof text==='string' && /(^|[^A-Za-z0-9_@])@DiscoElysiumPersBot(?![A-Za-z0-9_])/i.test(text);
+}
 export async function commandTargetsBot(env:Env,target?:string):Promise<boolean>{
   if(!target)return true;
   const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`);
