@@ -26,9 +26,10 @@ vi.mock('../src/generator',()=>({generate:vi.fn(async(_env:unknown,_s:unknown,_c
   return {kind:'reply',text:'Голос: ответ',cost:0.001,voice:'ЛОГИКА',candidates:['ЛОГИКА','ДРАМА','ТРЕПЕТ']};
 })}));
 
-async function send(text:string,apiKey='key',probability='0'):Promise<string[]>{
+async function send(text:string,apiKey='key',probability='0',photoFails=false):Promise<string[]>{
   const replies:string[]=[];
   vi.stubGlobal('fetch',vi.fn(async(_url:string,options?:{body?:string})=>{
+    if(photoFails&&_url.endsWith('/sendPhoto'))return new Response('Photo error',{status:400});
     const payload=JSON.parse(options!.body!);
     replies.push(payload.text??payload.caption);
     return new Response(JSON.stringify({ok:true}),{status:200});
@@ -103,26 +104,15 @@ describe('direct mention',()=>{
     expect(claim).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.anything(),false);
     expect(vi.mocked(generate).mock.calls[0][3]).toBe(false);
   });
-  it('falls back to text if Telegram cannot download the portrait',async()=>{
-    const fallbackCalls:string[]=[];
-    vi.spyOn(globalThis,'fetch'); // send() installs its own mock below
-    const replies=await send('@DiscoElysiumPersBot');
-    const mock=vi.mocked(fetch);
-    mock.mockReset();
-    mock.mockImplementation(async(url,_options)=>{
-      fallbackCalls.push(String(url));
-      if(String(url).endsWith('/sendPhoto'))return new Response('Bad photo',{status:400});
-      return new Response(JSON.stringify({ok:true}),{status:200});
-    });
-    // A new send() would replace the mock; call the production photo sender directly.
-    const {sendSkillPhoto,sendMessage}=await import('../src/telegram');
-    await expect(sendSkillPhoto({TELEGRAM_BOT_TOKEN:'test'} as Env,-1001,11,'ЛОГИКА','ЛОГИКА — Успех\nПроверка.')).rejects.toThrow('Telegram HTTP 400');
-    await sendMessage({TELEGRAM_BOT_TOKEN:'test'} as Env,-1001,11,'Текст');
-    expect(fallbackCalls).toEqual([
+  it('falls back to text when Telegram cannot download the portrait',async()=>{
+    const replies=await send('@DiscoElysiumPersBot','key','0',true);
+    expect(replies).toEqual(['Голос: ответ']);
+    expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual([
       'https://api.telegram.org/bottest/sendPhoto',
       'https://api.telegram.org/bottest/sendMessage'
     ]);
-    expect(replies).toEqual(['ЛОГИКА\nГолос: ответ']);
+    expect(settle).toHaveBeenCalledWith(expect.anything(),1,'sent',0.001);
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({delivery:'text_fallback',voice:'ЛОГИКА'}));
   });
   it('acknowledges a budget or concurrency rejection',async()=>{
     vi.mocked(claim).mockResolvedValueOnce(null);
