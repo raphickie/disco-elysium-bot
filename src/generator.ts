@@ -63,7 +63,7 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],mustR
   const focus=Math.min(context.length,Math.max(1,decision.focus_message));
   const query=[decision.topic,decision.mood,decision.angle,context[focus-1]?.body??''].join(' ');
   // The writer is stronger at picking semantic matches than our local keyword ranking.
-  // All 15 short curated samples fit cheaply and let it select the relevant examples itself.
+  // Use up to 15 short curated samples; the smaller Perception extract has fewer.
   const selected=selectReferences(decision.voice,query,15);
   // A direct mention or a 100% chat setting always gets a real reply, regardless of the model's boolean.
   const write=(examples:typeof selected,retry=false)=>complete(env,s.writer,[
@@ -74,7 +74,7 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],mustR
   if(copiesReference(text,selected)){
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
     const alternatives=selectReferences(decision.voice,query,15).filter(ref=>!copiesReference(text,[ref])).slice(0,REFERENCES_PER_REPLY);
-    if(alternatives.length<REFERENCES_PER_REPLY)throw Error('No safe reference alternatives');
+    if(alternatives.length<4)throw Error('No safe reference alternatives');
     text=(await write(alternatives,true)).slice(0,1000);
     if(copiesReference(text,selected)||copiesReference(text,alternatives))throw Error('LLM copied a game reference');
   }

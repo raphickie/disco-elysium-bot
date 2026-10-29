@@ -11,7 +11,21 @@ const PORTRAIT_FILES:Record<Voice,string>={
   'КОНЦЕПТУАЛИЗАЦИЯ':'conceptualization',
   'ДРАМА':'drama',
   'РИТОРИКА':'rhetoric',
-  'ВОЛЯ':'volition'
+  'ВОЛЯ':'volition',
+  'ЭНЦИКЛОПЕДИЯ':'encyclopedia',
+  'ВИЗУАЛЬНАЯ РЕКОНСТРУКЦИЯ':'visual-calculus',
+  'ESPRIT DE CORPS':'esprit-de-corps',
+  'ВНУШЕНИЕ':'suggestion',
+  'СТОЙКОСТЬ':'endurance',
+  'БОЛЕВОЙ ПОРОГ':'pain-threshold',
+  'ГРУБАЯ СИЛА':'physical-instrument',
+  'СУМРАК':'half-light',
+  'КООРДИНАЦИЯ':'hand-eye-coordination',
+  'ВНИМАТЕЛЬНОСТЬ':'perception-sight',
+  'СКОРОСТЬ РЕАКЦИИ':'reaction-speed',
+  'ЭКВИЛИБРИСТИКА':'savoir-faire',
+  'ТЕХНИКА':'interfacing',
+  'САМООБЛАДАНИЕ':'composure'
 };
 
 // Telegram downloads these public PNGs from our own repository after deployment.

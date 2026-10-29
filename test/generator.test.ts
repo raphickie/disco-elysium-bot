@@ -3,7 +3,7 @@ import {settings,type Env} from '../src/config';
 import {generate} from '../src/generator';
 import {selectReferences,copiesReference} from '../src/references';
 import {VOICE_REFERENCES} from '../src/voice-references';
-import {VOICES,sampleVoices} from '../src/voices';
+import {VOICES,VOICE_WEIGHTS,sampleVoices} from '../src/voices';
 
 const env={OPENAI_API_KEY:'test'} as Env;
 const s=settings(env);
@@ -58,7 +58,7 @@ describe('two-stage generation',()=>{
     expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('writes a reply to a direct mention even when the director returns false',async()=>{
-    vi.spyOn(Math,'random').mockReturnValue(0.4); // draw ЭМПАТИЯ as the first candidate
+    vi.spyOn(Math,'random').mockReturnValue(0.19); // draw ЭМПАТИЯ as the first candidate
     const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(false,'ЭМПАТИЯ'))).mockResolvedValueOnce(response('ЭМПАТИЯ — Успех\nТебя услышали.'));
     vi.stubGlobal('fetch',fetchMock);
     const result=await generate(env,s,context,true);
@@ -107,8 +107,9 @@ describe('curated game references',()=>{
   it('has enough source-linked examples for every active voice',()=>{
     for(const voice of VOICES){
       const pool=VOICE_REFERENCES[voice];
-      expect(pool.items).toHaveLength(15);
-      expect(new Set(pool.items.map(r=>r.line)).size).toBe(15);
+      expect(pool.items.length).toBeGreaterThanOrEqual(8);
+      expect(pool.items.length).toBeLessThanOrEqual(15);
+      expect(new Set(pool.items.map(r=>r.line)).size).toBe(pool.items.length);
       const refs=selectReferences(voice,'дождь спор вечеринка');
       expect(refs).toHaveLength(8);
       expect(new Set(refs.map(r=>r.line)).size).toBe(8);
@@ -128,17 +129,29 @@ describe('curated game references',()=>{
 describe('random voice candidate selection',()=>{
   it('draws three different voices without replacement',()=>{
     expect(sampleVoices(()=>0)).toEqual(VOICES.slice(0,3));
-    expect(sampleVoices(()=>0.999999)).toEqual([VOICES[9],VOICES[0],VOICES[1]]);
+    expect(sampleVoices(()=>0.999999)).toEqual([VOICES[23],VOICES[22],VOICES[21]]);
     expect(new Set(sampleVoices(()=>0.5)).size).toBe(3);
   });
   it('every voice has a chance to appear in the candidate set',()=>{
+    const total=VOICES.reduce((sum,voice)=>sum+VOICE_WEIGHTS[voice],0);
+    let before=0;
     for(let index=0;index<VOICES.length;index++){
-      const random=vi.fn().mockReturnValueOnce((index+0.25)/VOICES.length).mockReturnValue(0);
+      const random=vi.fn().mockReturnValueOnce((before+VOICE_WEIGHTS[VOICES[index]]/2)/total).mockReturnValue(0);
       const candidates=sampleVoices(random);
       expect(candidates[0]).toBe(VOICES[index]);
       expect(candidates).toHaveLength(3);
       expect(new Set(candidates).size).toBe(3);
       expect(random).toHaveBeenCalledTimes(3);
+      before+=VOICE_WEIGHTS[VOICES[index]];
     }
+  });
+  it('makes Inland Empire more likely and Drama less likely to be offered',()=>{
+    let state=123456789;
+    const random=()=>((state=(Math.imul(state,1664525)+1013904223)>>>0)/2**32);
+    const counts=new Map(VOICES.map(voice=>[voice,0]));
+    for(let i=0;i<20000;i++)
+      for(const voice of sampleVoices(random))counts.set(voice,(counts.get(voice)??0)+1);
+    expect(counts.get('ВНУТРЕННЯЯ ИМПЕРИЯ')).toBeGreaterThan(20000*3/24*1.2);
+    expect(counts.get('ДРАМА')).toBeLessThan(20000*3/24*0.9);
   });
 });

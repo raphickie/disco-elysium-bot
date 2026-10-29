@@ -3,10 +3,10 @@ import {VOICES} from '../src/voices';
 import {portraitUrl,formatSkillCaption} from '../src/portraits';
 
 describe('original skill portrait mapping',()=>{
-  it('has a unique PNG in our repository for all ten skills',()=>{
+  it('has a unique PNG in our repository for all 24 skills',()=>{
     const urls=VOICES.map(voice=>portraitUrl(voice));
-    expect(urls).toHaveLength(10);
-    expect(new Set(urls).size).toBe(10);
+    expect(urls).toHaveLength(24);
+    expect(new Set(urls).size).toBe(24);
     expect(urls.every(url=>url.startsWith('https://raw.githubusercontent.com/raphickie/disco-elysium-bot/master/assets/portraits/')&&url.endsWith('.png'))).toBe(true);
   });
   it('preserves the writer check status beneath the correct portrait',()=>{

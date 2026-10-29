@@ -15,14 +15,14 @@ function hash(value:string):number{
 
 export function selectReferences(voice:Voice,query:string,count=REFERENCES_PER_REPLY):VoiceReference[]{
   const source=VOICE_REFERENCES[voice];
-  if(!source || source.items.length<count)throw Error(`Missing voice references: ${voice}`);
+  if(!source || source.items.length===0)throw Error(`Missing voice references: ${voice}`);
   const terms=stems(query);
   const score=(ref:VoiceReference)=>{
     const tagMatches=[...stems(ref.tags)].filter(term=>terms.has(term)).length;
     const textMatches=[...stems(ref.text)].filter(term=>terms.has(term)).length;
     return tagMatches*4+textMatches;
   };
-  return [...source.items].sort((a,b)=>score(b)-score(a)||hash(`${query}:${b.line}`)-hash(`${query}:${a.line}`)).slice(0,count);
+  return [...source.items].sort((a,b)=>score(b)-score(a)||hash(`${query}:${b.line}`)-hash(`${query}:${a.line}`)).slice(0,Math.min(count,source.items.length));
 }
 
 export function referencePrompt(voice:Voice,refs:VoiceReference[]):string{
