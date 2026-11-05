@@ -21,7 +21,7 @@ const PORTRAIT_FILES:Record<Voice,string>={
   'ГРУБАЯ СИЛА':'physical-instrument',
   'СУМРАК':'half-light',
   'КООРДИНАЦИЯ':'hand-eye-coordination',
-  'ВНИМАТЕЛЬНОСТЬ':'perception-sight',
+  'ВОСПРИЯТИЕ':'perception-sight',
   'СКОРОСТЬ РЕАКЦИИ':'reaction-speed',
   'ЭКВИЛИБРИСТИКА':'savoir-faire',
   'ТЕХНИКА':'interfacing',
