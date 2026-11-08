@@ -41,7 +41,7 @@ export function formatSkillCaption(voice:Voice,generatedText:string):string {
   const match=firstLine.match(/[—–-]\s*\[?(Критический провал|Провал|Успех)\]?/i);
   const status=match?.[1];
   // The writer usually supplies "VOICE — STATUS" itself. Rebuild the heading from
-  // the actual director-selected voice so an LLM typo cannot use another portrait name.
+  // the actual selected voice so an LLM typo cannot use another portrait name.
   const body=(status || firstLine.startsWith(voice))?lines.slice(1).join('\n').trim():text;
   const heading=status?`${voice} — ${status}`:voice;
   return `${heading}\n${body}`.trim().slice(0,1024);

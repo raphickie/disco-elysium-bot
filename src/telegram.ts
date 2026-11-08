@@ -3,6 +3,7 @@ import type {Voice} from './voices';
 import {portraitUrl,formatSkillCaption} from './portraits';
 export type TelegramMessage={
   message_id:number;date:number;text?:string;caption?:string;
+  reply_to_message?:TelegramMessage;
   chat:{id:number;type:string};
   from?:{id:number;is_bot?:boolean;first_name?:string;last_name?:string;username?:string};
 };

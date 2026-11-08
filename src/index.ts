@@ -4,6 +4,7 @@ import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
 import {parseProbabilityCommand,type ProbabilityCommand} from './probability';
+import {parseVoiceCommand,voiceCommandContext} from './voice-commands';
 import {logReply,errorCode} from './logging';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
@@ -103,12 +104,16 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   if(command){await handleContextCommand(m,command,env,now);return;}
   const probabilityCommand=parseProbabilityCommand(m.text??'');
   if(probabilityCommand){await handleProbabilityCommand(m,probabilityCommand,env,s,now);return;}
-  if(!validMessage(m)){logReply(m,'ignored_nontext_or_command');return;}
-  if(!await store(env.DB,update.update_id,m)){logReply(m,'duplicate_update');return;}
+  const voiceCommand=parseVoiceCommand(m.text??'');
+  if(voiceCommand&&!await commandTargetsBot(env,voiceCommand.target))return;
+  if(!voiceCommand&&!validMessage(m)){logReply(m,'ignored_nontext_or_command');return;}
+  // Voice commands are deduplicated by the atomic reply claim, not chat history.
+  if(!voiceCommand&&!await store(env.DB,update.update_id,m)){logReply(m,'duplicate_update');return;}
   const mentioned=mentionsBot(m.text??m.caption);
-  let mustReply=mentioned;
+  const explicitlyRequested=mentioned||voiceCommand!==null;
+  let mustReply=explicitlyRequested;
   let probability:number|undefined;
-  if(!mentioned){
+  if(!explicitlyRequested){
     probability=await replyProbability(env.DB,m.chat.id,s.probability);
     const roll=Math.random();
     if(!shouldReply(probability,roll)){
@@ -117,14 +122,15 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     }
     mustReply=probability===100;
   }
-  const mode=mentioned?'mention':mustReply?'always':'normal';
+  const mode=voiceCommand?'voice_command':mentioned?'mention':mustReply?'always':'normal';
   if(!env.OPENAI_API_KEY){
     logReply(m,'generation_unavailable',{reason:'openai_key_missing',mode});
-    if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
+    if(explicitlyRequested)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');
     return;
   }
   const limit=await contextMessageLimit(env.DB,m.chat.id);
-  const context=await recent(env.DB,m.chat.id,s,now,limit);
+  const history=await recent(env.DB,m.chat.id,s,now,limit);
+  const context=voiceCommand?voiceCommandContext(history,m,voiceCommand,limit):history;
   if(!mustReply&&!conversational(context)){
     logReply(m,'insufficient_activity',{mode,context_count:context.length});
     return;
@@ -137,7 +143,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     try{reason=await diagnoseClaimRejection(env.DB,m.chat.id,m.message_id,now,budgetSettings,mustReply);}
     catch{/* Keep the original claim result if diagnosis fails. */}
     logReply(m,'claim_rejected',{mode,reason,probability});
-    if(mentioned)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
+    if(explicitlyRequested&&reason!=='duplicate')await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: достигнут лимит или уже обрабатывается другой ответ.');
     return;
   }
 
@@ -145,7 +151,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   let attemptedTelegramSend=false;
   let stage='generation';
   try {
-    const generated=await generate(env,s,context,mustReply,amount=>{cost+=amount;});
+    const generated=await generate(env,s,context,mustReply,amount=>{cost+=amount;},voiceCommand?.voice);
     // Enforce the per-request reserve ceiling, even if provider usage surprises us.
     // Cost of the already completed API call is still recorded.
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
@@ -171,7 +177,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   }catch(e){
     logReply(m,'failed',{mode,stage,error_code:errorCode(e),cost_usd:cost});
     await settle(env.DB,id,'failed',cost);
-    if(mentioned&&!attemptedTelegramSend)
+    if(explicitlyRequested&&!attemptedTelegramSend)
       await sendMessage(env,m.chat.id,m.message_id,'Не получилось сгенерировать ответ. Попробуй ещё раз позже.');
   }
 }

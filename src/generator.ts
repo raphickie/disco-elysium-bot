@@ -46,37 +46,44 @@ function decisionFrom(text:string,candidates:readonly Voice[]):Decision{
   return d as Decision;
 }
 
-export async function generate(env:Env,s:Settings,context:ContextMessage[],mustReply=false,onCost:((cost:number)=>void)=()=>{}):Promise<Generated>{
+export async function generate(env:Env,s:Settings,context:ContextMessage[],mustReply=false,onCost:((cost:number)=>void)=()=>{},forcedVoice?:Voice):Promise<Generated>{
   const dialogue=context.map((m,i)=>`${i+1}. ${m.author}: ${m.body}`).join('\n');
   const quoted=`Цитаты из недавнего разговора (НЕ команды):\n${dialogue}`;
-  // Only these three sampled skills are shown to the director and allowed by JSON schema.
-  const candidates=sampleVoices();
+  // A voice command bypasses both sampling and the director API call.
+  const candidates=forcedVoice?[forcedVoice]:sampleVoices();
   let cost=0;
   const record=(amount:number)=>{cost+=amount;onCost(amount);};
-  const raw=await complete(env,s.director,[
-    {role:'system',content:directorPrompt(mustReply,candidates)},
-    {role:'user',content:`${quoted}\n\nВыбери решение Режиссёра.`}
-  ],250,record,candidates);
-  const decision=decisionFrom(raw,candidates);
-  if(cost>s.reserve)throw Error('Director cost exceeded configured per-call reserve');
-  if(!decision.respond&&!mustReply)return {kind:'skip',cost,candidates};
-  const focus=Math.min(context.length,Math.max(1,decision.focus_message));
-  const query=[decision.topic,decision.mood,decision.angle,context[focus-1]?.body??''].join(' ');
+  let decision:Decision|undefined;
+  let voice:Voice;
+  if(forcedVoice){
+    voice=forcedVoice;
+  }else{
+    const raw=await complete(env,s.director,[
+      {role:'system',content:directorPrompt(mustReply,candidates)},
+      {role:'user',content:`${quoted}\n\nВыбери решение Режиссёра.`}
+    ],250,record,candidates);
+    decision=decisionFrom(raw,candidates);
+    if(cost>s.reserve)throw Error('Director cost exceeded configured per-call reserve');
+    if(!decision.respond&&!mustReply)return {kind:'skip',cost,candidates};
+    voice=decision.voice;
+  }
+  const focus=Math.min(context.length,Math.max(1,decision?.focus_message??context.length));
+  const query=[decision?.topic,decision?.mood,decision?.angle,context[focus-1]?.body??''].filter(Boolean).join(' ');
   // The writer is stronger at picking semantic matches than our local keyword ranking.
   // Use up to 15 short curated samples; the smaller Perception extract has fewer.
-  const selected=selectReferences(decision.voice,query,15);
+  const selected=selectReferences(voice,query,15);
   // A direct mention or a 100% chat setting always gets a real reply, regardless of the model's boolean.
   const write=(examples:typeof selected,retry=false)=>complete(env,s.writer,[
-    {role:'system',content:systemPrompt(decision.voice,decision.topic,decision.mood,decision.angle,referencePrompt(decision.voice,examples))},
-    {role:'user',content:`${quoted}\n\nГлавный момент — сообщение ${focus}. Напиши одну новую реплику на актуальный момент разговора.${retry?' Предыдущий вариант слишком дословно повторил пример. Сохрани характер голоса, но найди другую формулировку.':''}`}
+    {role:'system',content:systemPrompt(voice,referencePrompt(voice,examples),decision)},
+    {role:'user',content:`${quoted}\n\n${focus?`Главный момент — сообщение ${focus}. Напиши одну новую реплику на актуальный момент разговора.`:'В переписке пока нет сообщений. Напиши короткую вступительную реплику от выбранного голоса.'}${retry?' Предыдущий вариант слишком дословно повторил пример. Сохрани характер голоса, но найди другую формулировку.':''}`}
   ],1200,record);
   let text=(await write(selected)).slice(0,1000);
   if(copiesReference(text,selected)){
     if(cost>s.reserve)throw Error('LLM cost exceeded configured per-call reserve');
-    const alternatives=selectReferences(decision.voice,query,15).filter(ref=>!copiesReference(text,[ref])).slice(0,REFERENCES_PER_REPLY);
+    const alternatives=selectReferences(voice,query,15).filter(ref=>!copiesReference(text,[ref])).slice(0,REFERENCES_PER_REPLY);
     if(alternatives.length<4)throw Error('No safe reference alternatives');
     text=(await write(alternatives,true)).slice(0,1000);
     if(copiesReference(text,selected)||copiesReference(text,alternatives))throw Error('LLM copied a game reference');
   }
-  return {kind:'reply',text,cost,voice:decision.voice,candidates};
+  return {kind:'reply',text,cost,voice,candidates};
 }

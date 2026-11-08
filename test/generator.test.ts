@@ -103,6 +103,30 @@ describe('two-stage generation',()=>{
   });
 });
 
+describe('forced voice generation',()=>{
+  it('retries a copied reference using only the writer and accounts for both calls',async()=>{
+    const voice='ЭЛЕКТРОХИМИЯ';
+    const copied=selectReferences(voice,context[1].body,15)[0].text;
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(`${voice} — Успех\n${copied}`))
+      .mockResolvedValueOnce(response(`${voice} — Успех\nУ этого праздника подозрительно трезвая смета.`));
+    vi.stubGlobal('fetch',fetchMock);
+    const costs:number[]=[];
+    const result=await generate(env,s,context,true,cost=>costs.push(cost),voice);
+    expect(result).toMatchObject({kind:'reply',voice,candidates:[voice]});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for(const [,init] of fetchMock.mock.calls){
+      const request=JSON.parse(init.body);
+      expect(request.model).toBe(s.writer.model);
+      expect(request.messages[0].content).toContain(`Голос: ${voice}`);
+      expect(request.response_format).toBeUndefined();
+    }
+    expect(costs).toHaveLength(2);
+    expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).messages[1].content).toContain('слишком дословно');
+    expect(Math.random).not.toHaveBeenCalled();
+  });
+});
+
 describe('curated game references',()=>{
   it('has enough source-linked examples for every active voice',()=>{
     for(const voice of VOICES){
