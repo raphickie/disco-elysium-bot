@@ -1,10 +1,40 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import worker from '../src/index';
 import {parseVoiceCommand,voiceCommandContext} from '../src/voice-commands';
+import {VOICES,type Voice} from '../src/voices';
+import {VOICE_REFERENCES} from '../src/voice-references';
+import {portraitUrl} from '../src/portraits';
 import {store,recent,conversational,claim,diagnoseClaimRejection,settle,replyProbability} from '../src/storage';
 import {logReply} from '../src/logging';
 import type {Env} from '../src/config';
 import type {TelegramMessage} from '../src/telegram';
+
+const VOICE_COMMANDS=[
+  ['/inlandempire','ВНУТРЕННЯЯ ИМПЕРИЯ'],
+  ['/shivers','ТРЕПЕТ'],
+  ['/electrochemistry','ЭЛЕКТРОХИМИЯ'],
+  ['/logic','ЛОГИКА'],
+  ['/empathy','ЭМПАТИЯ'],
+  ['/authority','АВТОРИТЕТ'],
+  ['/conceptualization','КОНЦЕПТУАЛИЗАЦИЯ'],
+  ['/drama','ДРАМА'],
+  ['/rhetoric','РИТОРИКА'],
+  ['/volition','ВОЛЯ'],
+  ['/encyclopedia','ЭНЦИКЛОПЕДИЯ'],
+  ['/visualcalculus','ВИЗУАЛЬНАЯ РЕКОНСТРУКЦИЯ'],
+  ['/espritdecorps','ESPRIT DE CORPS'],
+  ['/suggestion','ВНУШЕНИЕ'],
+  ['/endurance','СТОЙКОСТЬ'],
+  ['/painthreshold','БОЛЕВОЙ ПОРОГ'],
+  ['/physicalinstrument','ГРУБАЯ СИЛА'],
+  ['/halflight','СУМРАК'],
+  ['/handeyecoordination','КООРДИНАЦИЯ'],
+  ['/perception','ВОСПРИЯТИЕ'],
+  ['/reactionspeed','СКОРОСТЬ РЕАКЦИИ'],
+  ['/savoirfaire','ЭКВИЛИБРИСТИКА'],
+  ['/interfacing','ТЕХНИКА'],
+  ['/composure','САМООБЛАДАНИЕ']
+] as const satisfies ReadonlyArray<readonly [string,Voice]>;
 
 vi.mock('../src/storage',async importOriginal=>({
   ...await importOriginal<typeof import('../src/storage')>(),
@@ -65,10 +95,17 @@ beforeEach(()=>vi.clearAllMocks());
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 
 describe('voice command parsing and context',()=>{
+  it('covers every available voice with a distinct command',()=>{
+    expect(VOICE_COMMANDS.map(([,voice])=>voice).sort()).toEqual([...VOICES].sort());
+    expect(new Set(VOICE_COMMANDS.map(([command])=>command)).size).toBe(VOICES.length);
+    for(const [command,voice] of VOICE_COMMANDS)
+      expect(parseVoiceCommand(command)).toEqual({voice,target:undefined,text:''});
+  });
   it('parses exact commands, targets and multiline arguments',()=>{
     expect(parseVoiceCommand('/electrochemistry')).toEqual({voice:'ЭЛЕКТРОХИМИЯ',target:undefined,text:''});
     expect(parseVoiceCommand(' /HalfLight@DiscoElysiumPersBot страх\nи злость ')).toEqual({voice:'СУМРАК',target:'DiscoElysiumPersBot',text:'страх\nи злость'});
-    for(const text of ['/halflight_extra','/electrochemistryExtra','/halflight@','/halflight!','текст /halflight','/ping'])
+    for(const text of ['/halflight_extra','/electrochemistryExtra','/halflight@','/halflight!','текст /halflight','/ping',
+      '/shivers_extra','/shivers!','/unknown','/constructor','/__proto__','/toString'])
       expect(parseVoiceCommand(text)).toBeNull();
   });
   it('bounds transient context and gives command arguments the final focus after the reply target',()=>{
@@ -82,17 +119,14 @@ describe('voice command parsing and context',()=>{
 });
 
 describe('voice command webhook to writer',()=>{
-  it.each([
-    ['/electrochemistry','ЭЛЕКТРОХИМИЯ','Electrochemistry','electrochemistry'],
-    ['/halflight','СУМРАК','Half Light','half-light']
-  ])('%s calls only the writer with the requested voice even at 0%%',async(command,voice,source,portrait)=>{
+  it.each(VOICE_COMMANDS)('%s calls only the writer with the requested voice even at 0%%',async(command,voice)=>{
     const random=vi.spyOn(Math,'random');
     const {llmRequests,replies}=await send(command);
     expect(llmRequests).toHaveLength(1);
     expect(llmRequests[0].model).toBe('gpt-6.1-sol');
     expect(llmRequests[0].response_format).toBeUndefined();
     expect(llmRequests[0].messages[0].content).toContain(`Голос: ${voice}`);
-    expect(llmRequests[0].messages[0].content).toContain(`result/${source}.json:`);
+    expect(llmRequests[0].messages[0].content).toContain(`${VOICE_REFERENCES[voice].source}:`);
     expect(llmRequests[0].messages[0].content).not.toContain('Режиссёр выбрал тему');
     expect(llmRequests[0].messages[1].content).toContain('Хочу устроить праздник');
     expect(llmRequests[0].messages[1].content).not.toContain(command);
@@ -104,14 +138,15 @@ describe('voice command webhook to writer',()=>{
     expect(settle).toHaveBeenCalledWith(expect.anything(),1,'sent',0.0007);
     expect(replies).toHaveLength(1);
     expect(replies[0].caption).toContain(voice);
-    expect(replies[0].photo).toContain(`${portrait}.png`);
+    expect(replies[0].photo).toBe(portraitUrl(voice));
     expect(replies[0].reply_parameters.message_id).toBe(11);
     expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({mode:'voice_command',voice,candidates:[voice]}));
   });
   it('handles a targeted command and passes its argument to the writer',async()=>{
-    const {llmRequests,fetchMock}=await send('/electrochemistry@DiscoElysiumPersBot хочется пиццы');
+    const {llmRequests,fetchMock}=await send('/shivers@DiscoElysiumPersBot хочется чаю');
     expect(llmRequests).toHaveLength(1);
-    expect(llmRequests[0].messages[1].content).toContain('2. Tester: хочется пиццы');
+    expect(llmRequests[0].messages[0].content).toContain('Голос: ТРЕПЕТ');
+    expect(llmRequests[0].messages[1].content).toContain('2. Tester: хочется чаю');
     expect(llmRequests[0].messages[1].content).toContain('Главный момент — сообщение 2');
     expect(fetchMock.mock.calls.filter(([url])=>url.endsWith('/getMe'))).toHaveLength(1);
   });
@@ -129,9 +164,17 @@ describe('voice command webhook to writer',()=>{
     expect(llmRequests[0].messages[1].content).not.toContain('сообщение 0');
   });
   it('ignores commands addressed to another bot before reading history or claiming a budget',async()=>{
-    const {llmRequests,replies}=await send('/halflight@OtherBot');
+    const {llmRequests,replies}=await send('/shivers@OtherBot');
     expect(llmRequests).toEqual([]);
     expect(replies).toEqual([]);
+    expect(recent).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+  });
+  it.each(['/unknown','/shivers_extra','/constructor','/__proto__'])('ignores unsupported commands without generating: %s',async(command)=>{
+    const {llmRequests,replies}=await send(command);
+    expect(llmRequests).toEqual([]);
+    expect(replies).toEqual([]);
+    expect(store).not.toHaveBeenCalled();
     expect(recent).not.toHaveBeenCalled();
     expect(claim).not.toHaveBeenCalled();
   });
@@ -196,14 +239,25 @@ describe('private replies for explicitly allowed users',()=>{
     expect(vi.mocked(settle).mock.calls[0][3]).toBeCloseTo(0.000735);
     expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({mode:'private'}));
   });
-  it.each(['/electrochemistry','/halflight'])('allows %s in the same private chat without the director',async(command)=>{
+  it.each(VOICE_COMMANDS)('allows %s in the same private chat without the director',async(command,voice)=>{
     const {llmRequests,replies}=await send(command,{message:privateMessage,env:privateEnv});
     expect(llmRequests.map(r=>r.model)).toEqual(['gpt-6.1-sol']);
+    expect(llmRequests[0].messages[0].content).toContain(`Голос: ${voice}`);
     expect(replies).toHaveLength(1);
     expect(replies[0].chat_id).toBe(80126579);
     expect(store).not.toHaveBeenCalled();
   });
-  it.each(['Привет','/electrochemistry','/halflight'])('denies another user before storing, reading context or generating: %s',async(text)=>{
+  it('answers the reported shivers command with its inline topic in the allowed DM',async()=>{
+    const {llmRequests,replies}=await send('/shivers хочешься чаю',{message:privateMessage,env:privateEnv});
+    expect(llmRequests.map(r=>r.model)).toEqual(['gpt-6.1-sol']);
+    expect(llmRequests[0].messages[0].content).toContain('Голос: ТРЕПЕТ');
+    expect(llmRequests[0].messages[1].content).toContain('2. Tester: хочешься чаю');
+    expect(llmRequests[0].messages[1].content).toContain('Главный момент — сообщение 2');
+    expect(replies).toHaveLength(1);
+    expect(replies[0].caption).toContain('ТРЕПЕТ');
+    expect(replies[0].chat_id).toBe(80126579);
+  });
+  it.each(['Привет','/electrochemistry','/halflight','/shivers'])('denies another user before storing, reading context or generating: %s',async(text)=>{
     const {llmRequests,replies}=await send(text,{
       message:{chat:{id:42,type:'private'},from:{id:42}},
       env:{...privateEnv,WHITELIST_ENABLED:'false',ALLOWED_CHAT_IDS:'42'}

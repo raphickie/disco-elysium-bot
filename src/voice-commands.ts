@@ -2,12 +2,37 @@ import type {Voice} from './voices';
 import type {TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
 
-const COMMAND_VOICES={electrochemistry:'ЭЛЕКТРОХИМИЯ',halflight:'СУМРАК'} as const satisfies Record<string,Voice>;
+const COMMAND_VOICES={
+  inlandempire:'ВНУТРЕННЯЯ ИМПЕРИЯ',
+  shivers:'ТРЕПЕТ',
+  electrochemistry:'ЭЛЕКТРОХИМИЯ',
+  logic:'ЛОГИКА',
+  empathy:'ЭМПАТИЯ',
+  authority:'АВТОРИТЕТ',
+  conceptualization:'КОНЦЕПТУАЛИЗАЦИЯ',
+  drama:'ДРАМА',
+  rhetoric:'РИТОРИКА',
+  volition:'ВОЛЯ',
+  encyclopedia:'ЭНЦИКЛОПЕДИЯ',
+  visualcalculus:'ВИЗУАЛЬНАЯ РЕКОНСТРУКЦИЯ',
+  espritdecorps:'ESPRIT DE CORPS',
+  suggestion:'ВНУШЕНИЕ',
+  endurance:'СТОЙКОСТЬ',
+  painthreshold:'БОЛЕВОЙ ПОРОГ',
+  physicalinstrument:'ГРУБАЯ СИЛА',
+  halflight:'СУМРАК',
+  handeyecoordination:'КООРДИНАЦИЯ',
+  perception:'ВОСПРИЯТИЕ',
+  reactionspeed:'СКОРОСТЬ РЕАКЦИИ',
+  savoirfaire:'ЭКВИЛИБРИСТИКА',
+  interfacing:'ТЕХНИКА',
+  composure:'САМООБЛАДАНИЕ'
+} as const satisfies Record<string,Voice>;
 export type VoiceCommand={voice:Voice;target?:string;text:string};
 
 export function parseVoiceCommand(text:string):VoiceCommand|null{
-  const match=/^\/(electrochemistry|halflight)(?:@([A-Za-z0-9_]+))?(?:\s+([\s\S]*))?$/i.exec(text.trim());
-  if(!match)return null;
+  const match=/^\/([a-z0-9_]{1,32})(?:@([A-Za-z0-9_]+))?(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  if(!match||!Object.hasOwn(COMMAND_VOICES,match[1].toLowerCase()))return null;
   const name=match[1].toLowerCase() as keyof typeof COMMAND_VOICES;
   return {voice:COMMAND_VOICES[name],target:match[2],text:(match[3]??'').trim().slice(0,900)};
 }
