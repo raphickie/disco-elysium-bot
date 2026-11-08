@@ -28,14 +28,18 @@ function message(text:string):TelegramMessage{
 
 async function send(text:string,options:{message?:Partial<TelegramMessage>;env?:Partial<Env>;llmFails?:boolean;photoFails?:boolean}={}){
   const llmRequests:Array<{model:string;messages:Array<{content:string}>;response_format?:unknown}>=[];
-  const replies:Array<{text?:string;caption?:string;photo?:string;reply_parameters:{message_id:number}}>=[];
+  const replies:Array<{chat_id:number;text?:string;caption?:string;photo?:string;reply_parameters:{message_id:number}}>=[];
   const fetchMock=vi.fn(async(url:string,init?:RequestInit)=>{
     if(url.endsWith('/getMe'))return Response.json({ok:true,result:{username:'DiscoElysiumPersBot'}});
     const body=JSON.parse(String(init?.body));
     if(url==='https://api.openai.com/v1/chat/completions'){
       llmRequests.push(body);
       if(options.llmFails)return new Response('unavailable',{status:429});
-      const voice=body.messages[0].content.includes('Голос: ЭЛЕКТРОХИМИЯ')?'ЭЛЕКТРОХИМИЯ':'СУМРАК';
+      if(body.response_format){
+        const voice=body.response_format.json_schema.schema.properties.voice.enum[0];
+        return Response.json({choices:[{message:{content:JSON.stringify({respond:false,voice,focus_message:1,topic:'праздник',mood:'восторг',angle:'трезвая смета'})}}],usage:{prompt_tokens:100,completion_tokens:50}});
+      }
+      const voice=body.messages[0].content.match(/Голос: ([^.]+)\./)?.[1];
       return Response.json({choices:[{message:{content:`${voice} — Успех\nУ этого праздника подозрительно трезвая смета.`}}],usage:{prompt_tokens:100,completion_tokens:50}});
     }
     if(url.endsWith('/sendPhoto')&&options.photoFails)return new Response('unavailable',{status:400});
@@ -171,5 +175,79 @@ describe('voice command webhook to writer',()=>{
     expect(llmRequests).toHaveLength(1);
     expect(replies).toHaveLength(1);
     expect(replies[0].text).toContain('СУМРАК');
+  });
+});
+
+describe('private replies for explicitly allowed users',()=>{
+  const privateMessage={chat:{id:80126579,type:'private'},from:{id:80126579,first_name:'Tester'}};
+  const privateEnv={ALLOWED_PRIVATE_USER_IDS:'80126579',ALLOWED_CHAT_IDS:''};
+
+  it('answers an ordinary DM through both stages even at 0% and when the director would skip',async()=>{
+    const {llmRequests,replies}=await send('Хочу устроить праздник',{message:privateMessage,env:privateEnv});
+    expect(llmRequests.map(r=>r.model)).toEqual(['gpt-6-luna','gpt-6.1-sol']);
+    expect(llmRequests[0].messages[0].content).toContain('respond обязан быть true');
+    expect(store).toHaveBeenCalledWith(expect.anything(),22,expect.objectContaining({chat:privateMessage.chat}));
+    expect(recent).toHaveBeenCalledWith(expect.anything(),80126579,expect.anything(),expect.any(Number),30);
+    expect(replyProbability).not.toHaveBeenCalled();
+    expect(conversational).not.toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledWith(expect.anything(),80126579,11,expect.any(Number),expect.anything(),true);
+    expect(replies).toHaveLength(1);
+    expect(replies[0].chat_id).toBe(80126579);
+    expect(vi.mocked(settle).mock.calls[0][3]).toBeCloseTo(0.000735);
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({mode:'private'}));
+  });
+  it.each(['/electrochemistry','/halflight'])('allows %s in the same private chat without the director',async(command)=>{
+    const {llmRequests,replies}=await send(command,{message:privateMessage,env:privateEnv});
+    expect(llmRequests.map(r=>r.model)).toEqual(['gpt-6.1-sol']);
+    expect(replies).toHaveLength(1);
+    expect(replies[0].chat_id).toBe(80126579);
+    expect(store).not.toHaveBeenCalled();
+  });
+  it.each(['Привет','/electrochemistry','/halflight'])('denies another user before storing, reading context or generating: %s',async(text)=>{
+    const {llmRequests,replies}=await send(text,{
+      message:{chat:{id:42,type:'private'},from:{id:42}},
+      env:{...privateEnv,WHITELIST_ENABLED:'false',ALLOWED_CHAT_IDS:'42'}
+    });
+    expect(llmRequests).toEqual([]);
+    expect(replies).toEqual([]);
+    expect(store).not.toHaveBeenCalled();
+    expect(recent).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'private_user_denied');
+  });
+  it.each([
+    {chat:{id:80126579,type:'private'},from:{id:42}},
+    {chat:{id:42,type:'private'},from:{id:80126579}},
+    {chat:{id:-1002,type:'supergroup'},from:{id:80126579}}
+  ])('requires both the private sender and private chat to be allowed: %j',async(message)=>{
+    const {llmRequests,replies}=await send('Привет',{message,env:privateEnv});
+    expect(llmRequests).toEqual([]);
+    expect(replies).toEqual([]);
+    expect(store).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+  });
+  it('does not generate in private chats without explicit configuration',async()=>{
+    const {llmRequests,replies}=await send('Привет',{message:privateMessage});
+    expect(llmRequests).toEqual([]);
+    expect(replies).toEqual([]);
+    expect(store).not.toHaveBeenCalled();
+  });
+  it('reports a budget rejection in the allowed private chat',async()=>{
+    vi.mocked(claim).mockResolvedValueOnce(null);
+    const {llmRequests,replies}=await send('Привет',{message:privateMessage,env:privateEnv});
+    expect(llmRequests).toEqual([]);
+    expect(replies[0].text).toContain('лимит');
+  });
+  it('reports unavailable generation in the allowed private chat',async()=>{
+    const {llmRequests,replies}=await send('Привет',{message:privateMessage,env:{...privateEnv,OPENAI_API_KEY:''}});
+    expect(llmRequests).toEqual([]);
+    expect(replies[0].text).toContain('недоступна');
+  });
+  it('deduplicates ordinary private messages before generation',async()=>{
+    vi.mocked(store).mockResolvedValueOnce(false);
+    const {llmRequests,replies}=await send('Привет',{message:privateMessage,env:privateEnv});
+    expect(llmRequests).toEqual([]);
+    expect(replies).toEqual([]);
+    expect(claim).not.toHaveBeenCalled();
   });
 });

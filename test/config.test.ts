@@ -31,6 +31,17 @@ describe('conversation',()=>{
   });
 });
 
+describe('private user allowlist',()=>{
+  it('defaults to no private generation even when the group whitelist is disabled',()=>{
+    expect(settings({WHITELIST_ENABLED:'false'} as Env).allowedPrivateUserIds.size).toBe(0);
+  });
+  it('reads private user IDs separately from group IDs',()=>{
+    const s=settings({ALLOWED_PRIVATE_USER_IDS:' 80126579, ',ALLOWED_CHAT_IDS:'-1001'} as Env);
+    expect([...s.allowedPrivateUserIds]).toEqual(['80126579']);
+    expect(isAllowed(80126579,s)).toBe(false);
+  });
+});
+
 
 describe('stage-specific OpenAI models and pricing',()=>{
   it('defaults to Luna for direction and Sol for writing',()=>{

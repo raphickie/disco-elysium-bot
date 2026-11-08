@@ -8,7 +8,7 @@ import {parseVoiceCommand,voiceCommandContext} from './voice-commands';
 import {logReply,errorCode} from './logging';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
-  if(!m||!['group','supergroup'].includes(m.chat.type))return false;
+  if(!m||!['group','supergroup','private'].includes(m.chat.type))return false;
   if(!m.from||m.from.is_bot)return false;
   const text=(m.text??m.caption??'').trim();
   if(!text||text.startsWith('/'))return false;
@@ -76,7 +76,8 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   const m=update.message;
   if(!m||!m.from||m.from.is_bot)return;
   const isGroup=['group','supergroup'].includes(m.chat.type);
-  if(!isGroup&&m.chat.type!=='private')return;
+  const isPrivate=m.chat.type==='private';
+  if(!isGroup&&!isPrivate)return;
   // Private chats allow an inexpensive ping even before any group is whitelisted.
   // Group pings honour the whitelist, just like normal generated replies.
   if(isGroup&&!isAllowed(m.chat.id,s)){
@@ -99,18 +100,24 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     return;
   }
 
-  if(!isGroup)return;
-  const command=parseContextCommand(m.text??'');
-  if(command){await handleContextCommand(m,command,env,now);return;}
-  const probabilityCommand=parseProbabilityCommand(m.text??'');
-  if(probabilityCommand){await handleProbabilityCommand(m,probabilityCommand,env,s,now);return;}
+  // Private generation has its own opt-in list, independent of the group whitelist.
+  if(isPrivate&&(!s.allowedPrivateUserIds.has(String(m.from.id))||m.chat.id!==m.from.id)){
+    logReply(m,'private_user_denied');
+    return;
+  }
+  if(isGroup){
+    const command=parseContextCommand(m.text??'');
+    if(command){await handleContextCommand(m,command,env,now);return;}
+    const probabilityCommand=parseProbabilityCommand(m.text??'');
+    if(probabilityCommand){await handleProbabilityCommand(m,probabilityCommand,env,s,now);return;}
+  }
   const voiceCommand=parseVoiceCommand(m.text??'');
   if(voiceCommand&&!await commandTargetsBot(env,voiceCommand.target))return;
   if(!voiceCommand&&!validMessage(m)){logReply(m,'ignored_nontext_or_command');return;}
   // Voice commands are deduplicated by the atomic reply claim, not chat history.
   if(!voiceCommand&&!await store(env.DB,update.update_id,m)){logReply(m,'duplicate_update');return;}
   const mentioned=mentionsBot(m.text??m.caption);
-  const explicitlyRequested=mentioned||voiceCommand!==null;
+  const explicitlyRequested=isPrivate||mentioned||voiceCommand!==null;
   let mustReply=explicitlyRequested;
   let probability:number|undefined;
   if(!explicitlyRequested){
@@ -122,7 +129,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     }
     mustReply=probability===100;
   }
-  const mode=voiceCommand?'voice_command':mentioned?'mention':mustReply?'always':'normal';
+  const mode=voiceCommand?'voice_command':isPrivate?'private':mentioned?'mention':mustReply?'always':'normal';
   if(!env.OPENAI_API_KEY){
     logReply(m,'generation_unavailable',{reason:'openai_key_missing',mode});
     if(explicitlyRequested)await sendMessage(env,m.chat.id,m.message_id,'Сейчас не могу ответить: генерация временно недоступна.');

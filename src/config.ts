@@ -5,6 +5,7 @@ export interface Env {
   OPENAI_API_KEY: string;
   WHITELIST_ENABLED?: string;
   ALLOWED_CHAT_IDS?: string;
+  ALLOWED_PRIVATE_USER_IDS?: string;
   REPLY_PERCENT?: string;
   COOLDOWN_SECONDS?: string;
   CONTEXT_WINDOW_MINUTES?: string;
@@ -22,7 +23,7 @@ export interface Env {
   OPENAI_WRITER_OUTPUT_USD_PER_MILLION?: string;
 }
 export type Settings = {
-  whitelistEnabled:boolean; allowedChatIds:Set<string>; probability:number; cooldown:number;
+  whitelistEnabled:boolean; allowedChatIds:Set<string>; allowedPrivateUserIds:Set<string>; probability:number; cooldown:number;
   contextWindow:number; historySeconds:number;
   chatDaily:number; chatMonthly:number; globalDaily:number; globalMonthly:number;
   reserve:number;
@@ -39,6 +40,7 @@ export function settings(e:Env):Settings {
   return {
     whitelistEnabled:(e.WHITELIST_ENABLED??'true').toLowerCase()!=='false',
     allowedChatIds:new Set((e.ALLOWED_CHAT_IDS??'').split(',').map(x=>x.trim()).filter(Boolean)),
+    allowedPrivateUserIds:new Set((e.ALLOWED_PRIVATE_USER_IDS??'').split(',').map(x=>x.trim()).filter(Boolean)),
     probability:number(e.REPLY_PERCENT,1,0,100),
     cooldown:number(e.COOLDOWN_SECONDS,900,0,86400),
     contextWindow:number(e.CONTEXT_WINDOW_MINUTES,20,1,120)*60,
