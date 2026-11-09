@@ -1,5 +1,5 @@
 import type {Voice} from './voices';
-import type {TelegramMessage} from './telegram';
+import {isBareBotMention,type TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
 
 const COMMAND_VOICES={
@@ -37,18 +37,33 @@ export function parseVoiceCommand(text:string):VoiceCommand|null{
   return {voice:COMMAND_VOICES[name],target:match[2],text:(match[3]??'').trim().slice(0,900)};
 }
 
-// Commands stay out of stored history. Their text and reply target are transient
-// context, placed last so the writer can focus on the explicitly selected topic.
-export function voiceCommandContext(history:ContextMessage[],m:TelegramMessage,command:VoiceCommand,limit:number):ContextMessage[]{
-  const context=[...history];
-  const add=(message:TelegramMessage,text:string)=>{
-    const body=text.trim().slice(0,900);
-    if(!body)return;
-    const author=[message.from?.first_name,message.from?.last_name].filter(Boolean).join(' ').slice(0,60)
-      ||message.from?.username?.slice(0,60)||'Аноним';
-    context.push({author,body,user_id:message.from?.id??0});
-  };
-  if(m.reply_to_message)add(m.reply_to_message,m.reply_to_message.text??m.reply_to_message.caption??'');
-  add(m,command.text);
+// A Telegram reply is used as focus only if it is a real human message.
+function humanMessage(m:TelegramMessage,rawText:string):ContextMessage|null{
+  const body=rawText.trim().slice(0,900);
+  if(!body || m.from?.is_bot || isBareBotMention(body))return null;
+  const author=[m.from?.first_name,m.from?.last_name].filter(Boolean).join(' ').slice(0,60)
+    ||m.from?.username?.slice(0,60)||'Аноним';
+  return {author,body,user_id:m.from?.id??0};
+}
+
+// Put the selected human message last, so a bare trigger doesn't become the focus.
+// Historical bare bot mentions are ignored as well.
+export function focusedHumanContext(history:ContextMessage[],m:TelegramMessage,limit:number,older?:ContextMessage|null):ContextMessage[]{
+  const context=history.filter(message=>message.body.trim()&&!isBareBotMention(message.body));
+  const target=m.reply_to_message;
+  const reply=target?humanMessage(target,target.text??target.caption??''):null;
+  if(reply)context.push(reply);
+  else if(context.length===0 && older && older.body.trim()&&!isBareBotMention(older.body))context.push(older);
+  return context.slice(-limit);
+}
+
+// Commands stay out of stored history. Explicit command text is always the focus;
+// bare commands instead focus on the previous human message, not a bot reply.
+export function voiceCommandContext(history:ContextMessage[],m:TelegramMessage,command:VoiceCommand,limit:number,older?:ContextMessage|null):ContextMessage[]{
+  const context=focusedHumanContext(history,m,limit,older);
+  if(command.text){
+    const inline=humanMessage(m,command.text);
+    if(inline)context.push(inline);
+  }
   return context.slice(-limit);
 }
