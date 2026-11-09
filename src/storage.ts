@@ -1,5 +1,5 @@
 import type {Settings} from './config';
-import type {TelegramMessage} from './telegram';
+import {isBareBotMention,type TelegramMessage} from './telegram';
 import type {ContextMessage} from './generator';
 import {DEFAULT_CONTEXT_MESSAGES,MAX_CONTEXT_MESSAGES} from './context';
 
@@ -57,6 +57,19 @@ export async function recent(db:D1Database,chatId:number,s:Settings,now:number,l
     'SELECT author,body,user_id FROM messages WHERE chat_id=? AND created_at>=? ORDER BY created_at DESC,message_id DESC LIMIT ?'
   ).bind(chatId,now-s.contextWindow,limit).all<ContextMessage>();
   return result.results.reverse();
+}
+
+
+// Look beyond the 20-minute conversation window for bare summons. Only human
+// messages are ever stored; bot replies and slash commands are not persisted.
+// Limit the search to our retention horizon and never select the current summon.
+export async function latestHumanMessage(
+  db:D1Database,chatId:number,beforeMessageId:number,now:number,historySeconds:number
+):Promise<ContextMessage|null>{
+  const rows=await db.prepare(
+    'SELECT author,body,user_id FROM messages WHERE chat_id=? AND message_id<? AND created_at>=? ORDER BY message_id DESC LIMIT 50'
+  ).bind(chatId,beforeMessageId,now-historySeconds).all<ContextMessage>();
+  return rows.results.find(row=>row.body.trim()&&!isBareBotMention(row.body))??null;
 }
 
 export function conversational(messages:ContextMessage[]):boolean{
