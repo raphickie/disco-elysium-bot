@@ -1,10 +1,10 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import worker from '../src/index';
-import {parseVoiceCommand,voiceCommandContext} from '../src/voice-commands';
+import {parseVoiceCommand,voiceCommandContext,focusedHumanContext} from '../src/voice-commands';
 import {VOICES,type Voice} from '../src/voices';
 import {VOICE_REFERENCES} from '../src/voice-references';
 import {portraitUrl} from '../src/portraits';
-import {store,recent,conversational,claim,diagnoseClaimRejection,settle,replyProbability} from '../src/storage';
+import {store,recent,conversational,claim,diagnoseClaimRejection,settle,replyProbability,latestHumanMessage} from '../src/storage';
 import {logReply} from '../src/logging';
 import type {Env} from '../src/config';
 import type {TelegramMessage} from '../src/telegram';
@@ -46,7 +46,8 @@ vi.mock('../src/storage',async importOriginal=>({
   settle:vi.fn(async()=>{}),
   contextMessageLimit:vi.fn(async()=>30),
   replyProbability:vi.fn(async()=>0),
-  chatDailyLimit:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback)
+  chatDailyLimit:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
+  latestHumanMessage:vi.fn(async()=>null)
 }));
 vi.mock('../src/logging',async importOriginal=>({
   ...await importOriginal<typeof import('../src/logging')>(),logReply:vi.fn()
@@ -107,6 +108,33 @@ describe('voice command parsing and context',()=>{
     for(const text of ['/halflight_extra','/electrochemistryExtra','/halflight@','/halflight!','текст /halflight','/ping',
       '/shivers_extra','/shivers!','/unknown','/constructor','/__proto__','/toString'])
       expect(parseVoiceCommand(text)).toBeNull();
+  });
+  it('does not use a reply to the bot as context for a bare command',()=>{
+    const previous=[{author:'Аня',body:'Сломался чайник, как быть?',user_id:100}];
+    const command=parseVoiceCommand('/logic')!;
+    const botReply={...message('ЛОГИКА — Успех'),from:{id:999,is_bot:true,first_name:'DiscoBot'}};
+    const context=voiceCommandContext(previous,{...message('/logic'),reply_to_message:botReply},command,30);
+    expect(context.map(m=>m.body)).toEqual(['Сломался чайник, как быть?']);
+  });
+  it('prefers a human reply target to the last chronological message',()=>{
+    const previous=[{author:'Аня',body:'Второе сообщение',user_id:100}];
+    const target={...message('Первое сообщение'),from:{id:111,first_name:'Борис',is_bot:false}};
+    const context=voiceCommandContext(previous,{...message('/drama'),reply_to_message:target},parseVoiceCommand('/drama')!,30);
+    expect(context.at(-1)).toMatchObject({body:'Первое сообщение',author:'Борис'});
+  });
+  it('ignores bare bot mentions as conversation content',()=>{
+    const history=[{author:'Аня',body:'Хочу собаку',user_id:100},{author:'Tester',body:'@DiscoElysiumPersBot',user_id:42}];
+    expect(focusedHumanContext(history,message('@DiscoElysiumPersBot'),30).map(m=>m.body)).toEqual(['Хочу собаку']);
+  });
+  it('uses an earlier human message outside the 20-minute window for an empty command',async()=>{
+    vi.mocked(recent).mockResolvedValueOnce([]);
+    vi.mocked(latestHumanMessage).mockResolvedValueOnce({author:'Борис',body:'Вчера потерял документы',user_id:55});
+    const {llmRequests}=await send('/drama');
+    expect(latestHumanMessage).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.any(Number));
+    expect(llmRequests).toHaveLength(1);
+    expect(llmRequests[0].messages[1].content).toContain('1. Борис: Вчера потерял документы');
+    expect(llmRequests[0].messages[1].content).toContain('Главный момент — сообщение 1');
+    expect(llmRequests[0].messages[1].content).not.toContain('вступительную реплику');
   });
   it('bounds transient context and gives command arguments the final focus after the reply target',()=>{
     const history=[1,2,3].map(n=>({author:'Tester',body:`старое ${n}`,user_id:42}));
