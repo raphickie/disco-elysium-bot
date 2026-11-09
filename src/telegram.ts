@@ -13,6 +13,10 @@ export type TelegramUpdate={update_id:number;message?:TelegramMessage};
 export function isPingCommand(text:string|undefined):boolean {
   return typeof text==='string' && text.trim().toLowerCase()==='/ping';
 }
+// A mention with no meaningful text is a trigger, not something the bot should discuss.
+export function isBareBotMention(text:string|undefined):boolean {
+  return typeof text==='string' && /^@DiscoElysiumPersBot[.!?…]*$/i.test(text.trim());
+}
 export function mentionsBot(text:string|undefined):boolean {
   return typeof text==='string' && /(^|[^A-Za-z0-9_@])@DiscoElysiumPersBot(?![A-Za-z0-9_])/i.test(text);
 }
