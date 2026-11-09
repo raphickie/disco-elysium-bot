@@ -1,10 +1,10 @@
 import {settings,isAllowed,shouldReply,type Env,type Settings} from './config';
-import {type TelegramUpdate,type TelegramMessage,sendMessage,sendSkillPhoto,isPingCommand,mentionsBot,commandTargetsBot,isChatAdmin} from './telegram';
-import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability,chatDailyLimit} from './storage';
+import {type TelegramUpdate,type TelegramMessage,sendMessage,sendSkillPhoto,isPingCommand,mentionsBot,isBareBotMention,commandTargetsBot,isChatAdmin} from './telegram';
+import {store,recent,conversational,claim,diagnoseClaimRejection,settle,cleanup,contextMessageLimit,setContextMessageLimit,replyProbability,setReplyProbability,resetReplyProbability,chatDailyLimit,latestHumanMessage} from './storage';
 import {generate} from './generator';
 import {parseContextCommand,type ContextCommand} from './context';
 import {parseProbabilityCommand,type ProbabilityCommand} from './probability';
-import {parseVoiceCommand,voiceCommandContext} from './voice-commands';
+import {parseVoiceCommand,voiceCommandContext,focusedHumanContext} from './voice-commands';
 import {logReply,errorCode} from './logging';
 
 function validMessage(m:TelegramMessage|undefined):m is TelegramMessage {
@@ -137,7 +137,17 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
   }
   const limit=await contextMessageLimit(env.DB,m.chat.id);
   const history=await recent(env.DB,m.chat.id,s,now,limit);
-  const context=voiceCommand?voiceCommandContext(history,m,voiceCommand,limit):history;
+  // Empty skill commands and bare @mentions should target the last *human*
+  // message, even if it is older than the normal conversation window.
+  const bareMention=mentioned&&isBareBotMention(m.text??m.caption);
+  const emptySummon=(voiceCommand!==null&&voiceCommand.text.length===0)||bareMention;
+  let context=voiceCommand?voiceCommandContext(history,m,voiceCommand,limit)
+    :bareMention?focusedHumanContext(history,m,limit):history;
+  if(emptySummon&&context.length===0){
+    const older=await latestHumanMessage(env.DB,m.chat.id,m.message_id,now,s.historySeconds);
+    context=voiceCommand?voiceCommandContext(history,m,voiceCommand,limit,older)
+      :focusedHumanContext(history,m,limit,older);
+  }
   if(!mustReply&&!conversational(context)){
     logReply(m,'insufficient_activity',{mode,context_count:context.length});
     return;
