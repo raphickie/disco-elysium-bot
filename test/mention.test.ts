@@ -1,7 +1,7 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
 import worker from '../src/index';
 import {mentionsBot} from '../src/telegram';
-import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability,chatDailyLimit} from '../src/storage';
+import {store,recent,conversational,claim,settle,contextMessageLimit,replyProbability,chatDailyLimit,latestHumanMessage} from '../src/storage';
 import {generate} from '../src/generator';
 import {logReply} from '../src/logging';
 import type {Env} from '../src/config';
@@ -16,6 +16,7 @@ vi.mock('../src/storage',()=>({
   cleanup:vi.fn(async()=>{}),
   contextMessageLimit:vi.fn(async()=>30),
   chatDailyLimit:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
+  latestHumanMessage:vi.fn(async()=>null),
   setContextMessageLimit:vi.fn(async()=>{}),
   replyProbability:vi.fn(async(_db:unknown,_chatId:number,fallback:number)=>fallback),
   setReplyProbability:vi.fn(async()=>{}),
@@ -77,6 +78,28 @@ describe('direct mention',()=>{
       photo:'https://raw.githubusercontent.com/raphickie/disco-elysium-bot/master/assets/portraits/logic.png',
       reply_parameters:{message_id:11}
     });
+  });
+  it('focuses an empty @mention on the previous human message instead of the tag',async()=>{
+    vi.mocked(recent).mockResolvedValueOnce([
+      {author:'Аня',body:'Давай закажем пиццу',user_id:88},
+      {author:'Tester',body:'@DiscoElysiumPersBot',user_id:42}
+    ]);
+    await send('@DiscoElysiumPersBot');
+    const context=vi.mocked(generate).mock.calls[0][2];
+    expect(context.map(m=>m.body)).toEqual(['Давай закажем пиццу']);
+    expect(latestHumanMessage).not.toHaveBeenCalled();
+  });
+  it('looks up the previous person beyond the active window for a bare mention',async()=>{
+    vi.mocked(recent).mockResolvedValueOnce([{author:'Tester',body:'@DiscoElysiumPersBot',user_id:42}]);
+    vi.mocked(latestHumanMessage).mockResolvedValueOnce({author:'Борис',body:'Забыл телефон в такси',user_id:17});
+    await send('@DiscoElysiumPersBot');
+    expect(latestHumanMessage).toHaveBeenCalledWith(expect.anything(),-1001,11,expect.any(Number),expect.any(Number));
+    expect(vi.mocked(generate).mock.calls[0][2]).toEqual([{author:'Борис',body:'Забыл телефон в такси',user_id:17}]);
+  });
+  it('leaves a meaningful @mention intact',async()=>{
+    await send('@DiscoElysiumPersBot, прокомментируй эту ситуацию');
+    expect(vi.mocked(generate).mock.calls[0][2]).toEqual([{author:'Tester',body:'одна реплика',user_id:42}]);
+    expect(latestHumanMessage).not.toHaveBeenCalled();
   });
   it('keeps ordinary messages under the probability gate',async()=>{
     expect(await send('Обычное сообщение')).toEqual([]);
