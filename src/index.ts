@@ -190,7 +190,7 @@ async function process(update:TelegramUpdate,env:Env,s:Settings):Promise<void>{
     }
     stage='settlement';
     await settle(env.DB,id,'sent',cost);
-    logReply(m,'sent',{mode,voice:generated.voice,candidates:generated.candidates,delivery,cost_usd:cost});
+    logReply(m,'sent',{mode,voice:generated.voice,check:generated.check,candidates:generated.candidates,delivery,cost_usd:cost});
   }catch(e){
     logReply(m,'failed',{mode,stage,error_code:errorCode(e),cost_usd:cost});
     await settle(env.DB,id,'failed',cost);
