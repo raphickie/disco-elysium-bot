@@ -24,7 +24,8 @@ describe('two-stage generation',()=>{
     vi.stubGlobal('fetch',fetchMock);
     const costs:number[]=[];
     const result=await generate(env,s,context,false,cost=>costs.push(cost));
-    expect(result).toMatchObject({kind:'reply',voice:'ТРЕПЕТ',candidates:VOICES.slice(0,3)});
+    expect(result).toMatchObject({kind:'reply',voice:'ТРЕПЕТ',check:'Успех',candidates:VOICES.slice(0,3)});
+    if(result.kind==='reply')expect(result.text).toMatch(/^ТРЕПЕТ — Успех\n/);
     expect(costs).toHaveLength(2);
     expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
     const first=JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -44,6 +45,8 @@ describe('two-stage generation',()=>{
     expect(first.messages[0].content).toContain('Обычный разговор: можно промолчать');
     expect(second.response_format).toBeUndefined();
     expect(second.messages[0].content).toContain('Голос: ТРЕПЕТ');
+    expect(second.messages[0].content).toContain('РЕЗУЛЬТАТ ПРОВЕРКИ НАВЫКА');
+    expect(second.messages[0].content).toContain('ПРОВЕРКА УСПЕШНА');
     expect(second.messages[0].content).toContain('остановка стала главным героем');
     expect(second.messages[0].content).toContain('result/Shivers.json:');
     expect((second.messages[0].content.match(/\[result\/Shivers\.json:/g)??[])).toHaveLength(15);
@@ -123,7 +126,54 @@ describe('forced voice generation',()=>{
     expect(costs).toHaveLength(2);
     expect(result.cost).toBeCloseTo(costs[0]+costs[1]);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).messages[1].content).toContain('слишком дословно');
-    expect(Math.random).not.toHaveBeenCalled();
+    // Forced commands skip voice sampling, but still roll the skill check once.
+    expect(Math.random).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('check outcomes are chosen by code before writing',()=>{
+  it('uses failure to direct the randomly selected voice and overrides a contrary LLM heading',async()=>{
+    vi.spyOn(Math,'random')
+      .mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.80);
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(decision(true)))
+      .mockResolvedValueOnce(response('ТРЕПЕТ — Успех\nНа остановке появилась улика.'));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context);
+    expect(result).toMatchObject({kind:'reply',check:'Провал'});
+    if(result.kind==='reply')
+      expect(result.text).toBe('ТРЕПЕТ — Провал\nНа остановке появилась улика.');
+    const second=JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(second.messages[0].content).toContain('РЕЗУЛЬТАТ ПРОВЕРКИ НАВЫКА (уже определён случайным броском, не меняй): Провал');
+    expect(second.messages[0].content).toContain('ошибочно интерпретирует');
+    expect(second.messages[0].content).toContain('Напиши только САМ ТЕКСТ реплики');
+    expect(Math.random).toHaveBeenCalledTimes(4); // 3 candidates, 1 check
+  });
+  it('generates critical failure for a forced skill using just one draw and no director',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0.98);
+    const fetchMock=vi.fn().mockResolvedValueOnce(response('ЛОГИКА — Успех\nЭто просто прекрасное объяснение.'));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context,true,()=>{},'ЛОГИКА');
+    expect(result).toMatchObject({kind:'reply',voice:'ЛОГИКА',check:'Критический провал',candidates:['ЛОГИКА']});
+    if(result.kind==='reply')expect(result.text).toBe('ЛОГИКА — Критический провал\nЭто просто прекрасное объяснение.');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content).toContain('грандиозный, нелепый');
+    expect(Math.random).toHaveBeenCalledOnce();
+  });
+  it('preserves the rolled outcome when a writer retry is necessary',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0.88);
+    const voice='ЭЛЕКТРОХИМИЯ';
+    const copied=selectReferences(voice,context[1].body,15)[0].text;
+    const fetchMock=vi.fn().mockResolvedValueOnce(response(`${voice} — Успех\n${copied}`))
+      .mockResolvedValueOnce(response(`${voice} — Успех\nКритическое расследование холодильника.`));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=await generate(env,s,context,true,()=>{},voice);
+    expect(result).toMatchObject({kind:'reply',check:'Провал'});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for(const [,init] of fetchMock.mock.calls){
+      expect(JSON.parse(init.body).messages[0].content).toContain('РЕЗУЛЬТАТ ПРОВЕРКИ НАВЫКА (уже определён случайным броском, не меняй): Провал');
+    }
+    expect(Math.random).toHaveBeenCalledOnce();
   });
 });
 
