@@ -1,4 +1,5 @@
 import type {Voice} from './voices';
+import type {SkillCheck} from './skill-check';
 
 // Original game portraits, copied to assets/portraits/ (see README for attribution).
 const PORTRAIT_FILES:Record<Voice,string>={
@@ -34,15 +35,16 @@ export function portraitUrl(voice:Voice):string {
   return `https://raw.githubusercontent.com/raphickie/disco-elysium-bot/master/assets/portraits/${PORTRAIT_FILES[voice]}.png`;
 }
 
-export function formatSkillCaption(voice:Voice,generatedText:string):string {
+export function formatSkillCaption(voice:Voice,generatedText:string,forcedCheck?:SkillCheck):string {
   const text=generatedText.trim();
   const lines=text.split(/\r?\n/);
   const firstLine=lines[0]??'';
   const match=firstLine.match(/[—–-]\s*\[?(Критический провал|Провал|Успех)\]?/i);
-  const status=match?.[1];
-  // The writer usually supplies "VOICE — STATUS" itself. Rebuild the heading from
-  // the actual selected voice so an LLM typo cannot use another portrait name.
-  const body=(status || firstLine.startsWith(voice))?lines.slice(1).join('\n').trim():text;
+  const status=forcedCheck??match?.[1];
+  // Strip any heading invented by the writer, but never discard a genuine
+  // first sentence merely because a status was supplied by the application.
+  const hasWriterHeading=Boolean(match)||firstLine.startsWith(voice);
+  const body=hasWriterHeading?lines.slice(1).join('\n').trim():text;
   const heading=status?`${voice} — ${status}`:voice;
   return `${heading}\n${body}`.trim().slice(0,1024);
 }

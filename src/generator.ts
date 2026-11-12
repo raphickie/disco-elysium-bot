@@ -1,8 +1,10 @@
 import type {Env,Settings} from './config';
 import {sampleVoices,directorPrompt,systemPrompt,type Voice} from './voices';
 import {selectReferences,referencePrompt,copiesReference,REFERENCES_PER_REPLY} from './references';
+import {rollSkillCheck,type SkillCheck} from './skill-check';
+import {formatSkillCaption} from './portraits';
 export type ContextMessage={author:string;body:string;user_id:number};
-export type Generated={kind:'reply';text:string;cost:number;voice:Voice;candidates:Voice[]}|{kind:'skip';cost:number;candidates:Voice[]};
+export type Generated={kind:'reply';text:string;cost:number;voice:Voice;check:SkillCheck;candidates:Voice[]}|{kind:'skip';cost:number;candidates:Voice[]};
 type Decision={respond:boolean;voice:Voice;focus_message:number;topic:string;mood:string;angle:string};
 type Completion={choices?:Array<{message?:{content?:string|null}}>;usage?:{prompt_tokens?:number;completion_tokens?:number}};
 
@@ -67,6 +69,8 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],mustR
     if(!decision.respond&&!mustReply)return {kind:'skip',cost,candidates};
     voice=decision.voice;
   }
+  // Only replies get checks. Draw once, before writing; retries keep the same outcome.
+  const check=rollSkillCheck();
   const focus=Math.min(context.length,Math.max(1,decision?.focus_message??context.length));
   const query=[decision?.topic,decision?.mood,decision?.angle,context[focus-1]?.body??''].filter(Boolean).join(' ');
   // The writer is stronger at picking semantic matches than our local keyword ranking.
@@ -74,7 +78,7 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],mustR
   const selected=selectReferences(voice,query,15);
   // A direct mention or a 100% chat setting always gets a real reply, regardless of the model's boolean.
   const write=(examples:typeof selected,retry=false)=>complete(env,s.writer,[
-    {role:'system',content:systemPrompt(voice,referencePrompt(voice,examples),decision)},
+    {role:'system',content:systemPrompt(voice,referencePrompt(voice,examples),check,decision)},
     {role:'user',content:`${quoted}\n\n${focus?`Главный момент — сообщение ${focus}. Напиши одну новую реплику на актуальный момент разговора.`:'В переписке пока нет сообщений. Напиши короткую вступительную реплику от выбранного голоса.'}${retry?' Предыдущий вариант слишком дословно повторил пример. Сохрани характер голоса, но найди другую формулировку.':''}`}
   ],1200,record);
   let text=(await write(selected)).slice(0,1000);
@@ -85,5 +89,7 @@ export async function generate(env:Env,s:Settings,context:ContextMessage[],mustR
     text=(await write(alternatives,true)).slice(0,1000);
     if(copiesReference(text,selected)||copiesReference(text,alternatives))throw Error('LLM copied a game reference');
   }
-  return {kind:'reply',text,cost,voice,candidates};
+  // Override any LLM-generated heading so Telegram photo AND text fallback
+  // always show the check drawn by code, not a label the model invented.
+  return {kind:'reply',text:formatSkillCaption(voice,text,check),cost,voice,check,candidates};
 }

@@ -158,7 +158,7 @@ describe('voice command webhook to writer',()=>{
     expect(llmRequests[0].messages[0].content).not.toContain('Режиссёр выбрал тему');
     expect(llmRequests[0].messages[1].content).toContain('Хочу устроить праздник');
     expect(llmRequests[0].messages[1].content).not.toContain(command);
-    expect(random).not.toHaveBeenCalled();
+    expect(random).toHaveBeenCalledTimes(1); // skill check, not voice sampling
     expect(store).not.toHaveBeenCalled();
     expect(replyProbability).not.toHaveBeenCalled();
     expect(conversational).not.toHaveBeenCalled();
@@ -169,6 +169,15 @@ describe('voice command webhook to writer',()=>{
     expect(replies[0].photo).toBe(portraitUrl(voice));
     expect(replies[0].reply_parameters.message_id).toBe(11);
     expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({mode:'voice_command',voice,candidates:[voice]}));
+  });
+  it('posts the exact critical-failure result under a skill portrait even if the writer says success',async()=>{
+    vi.spyOn(Math,'random').mockReturnValue(0.98);
+    const {llmRequests,replies}=await send('/logic');
+    expect(llmRequests).toHaveLength(1);
+    expect(llmRequests[0].messages[0].content).toContain('РЕЗУЛЬТАТ ПРОВЕРКИ НАВЫКА (уже определён случайным броском, не меняй): Критический провал');
+    expect(replies).toHaveLength(1);
+    expect(replies[0].caption).toBe('ЛОГИКА — Критический провал\nУ этого праздника подозрительно трезвая смета.');
+    expect(logReply).toHaveBeenCalledWith(expect.anything(),'sent',expect.objectContaining({check:'Критический провал',delivery:'photo'}));
   });
   it('handles a targeted command and passes its argument to the writer',async()=>{
     const {llmRequests,fetchMock}=await send('/shivers@DiscoElysiumPersBot хочется чаю');
